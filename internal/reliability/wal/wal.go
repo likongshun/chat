@@ -24,12 +24,12 @@ func Open(o Options)(*WAL,error){
 }
 func (w *WAL) loadManifest()error{
  b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
- if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};return nil
+ if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.CheckpointSeq>0{cp,e:=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"));if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
 }
 func (w *WAL) recover()error{
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=uint64(0)
  for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
-  e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
+  e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
  }
  w.next=max+1;if w.next==0{w.next=1};return nil
 }
@@ -49,7 +49,14 @@ func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
  st,e:=w.data.Stat();if e!=nil{return r,e};if st.Size()>=w.opts.SegmentBytes{if e=w.rotate();e!=nil{return r,e}};return r,nil
 }
 func (w *WAL) rotate()error{
- if e:=w.data.Sync();e!=nil{return e};if e:=w.data.Close();e!=nil{return e};w.manifest.ActiveSegment++;if e:=w.saveManifest();e!=nil{return e};return w.openDataOnly()
+ if w.data==nil{return os.ErrClosed}
+ if e:=w.data.Sync();e!=nil{return e}
+ if e:=w.data.Close();e!=nil{return e}
+ old:=w.manifest.ActiveSegment
+ w.manifest.ActiveSegment++
+ if e:=w.saveManifest();e!=nil{w.manifest.ActiveSegment=old;_ = w.openDataOnly();return e}
+ if e:=w.openDataOnly();e!=nil{return fmt.Errorf("manifest advanced to segment %d but opening it failed: %w",w.manifest.ActiveSegment,e)}
+ d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
 }
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
 func (w *WAL) Ack(a Ack)error{
@@ -84,7 +91,16 @@ func (w *WAL) Ack(a Ack)error{
  return nil
 }
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
- acked:=map[string]map[uint64]bool{};e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if json.Unmarshal(b,&a)==nil{if acked[a.Sink]==nil{acked[a.Sink]=map[uint64]bool{}};acked[a.Sink][a.Seq]=true};return nil});return acked,e
+ acked:=map[string]map[uint64]bool{}
+ e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{
+  var a Ack
+  if e:=json.Unmarshal(b,&a);e!=nil{return fmt.Errorf("decode ACK record: %w",e)}
+  if a.Seq==0||a.EventID==""||(a.Sink!="mqtt"&&a.Sink!="influx"){return fmt.Errorf("invalid ACK record")}
+  if acked[a.Sink]==nil{acked[a.Sink]=map[uint64]bool{}}
+  acked[a.Sink][a.Seq]=true
+  return nil
+ })
+ return acked,e
 }
 func (w *WAL) Pending()([]Record,error){
  w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return nil,e}
@@ -94,11 +110,32 @@ func (w *WAL) Pending()([]Record,error){
  };return out,nil
 }
 func (w *WAL) Checkpoint(seq uint64)error{
- w.mu.Lock();defer w.mu.Unlock();if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
- acked,e:=w.ackState();if e!=nil{return e};files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
- for _,p:=range files{e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)};return nil});if e!=nil{return e}}
- cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(cp);if e!=nil{return e};if e=atomicFile(filepath.Join(w.opts.Dir,"checkpoint.json"),b);e!=nil{return e}
- w.manifest.CheckpointSeq=seq;return w.saveManifest()
+ w.mu.Lock();defer w.mu.Unlock()
+ if w.closed{return os.ErrClosed}
+ if seq<w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint cannot move backwards from %d to %d",w.manifest.CheckpointSeq,seq)}
+ if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
+ // Freeze and persist both logs before recording a checkpoint boundary.
+ if w.data!=nil{if e:=w.data.Sync();e!=nil{return e}}
+ if w.ack!=nil{if e:=w.ack.Sync();e!=nil{return e}}
+ acked,e:=w.ackState();if e!=nil{return e}
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
+ sort.Strings(files)
+ for _,p:=range files{
+  var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
+  if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{
+   var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
+   if r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)}
+   return nil
+  });if e!=nil{return e}
+ }
+ cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()}
+ b,e:=json.Marshal(cp);if e!=nil{return e}
+ if e=atomicFile(filepath.Join(w.opts.Dir,"checkpoint.json"),b);e!=nil{return e}
+ old:=w.manifest.CheckpointSeq
+ w.manifest.CheckpointSeq=seq
+ if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;return e}
+ return nil
 }
 func (w *WAL) saveManifest()error{b,e:=json.Marshal(w.manifest);if e!=nil{return e};return atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b)}
 func atomicFile(path string,b []byte)error{
@@ -106,18 +143,37 @@ func atomicFile(path string,b []byte)error{
 }
 func (w *WAL) Reclaim()error{
  w.mu.Lock();defer w.mu.Unlock()
- // Advance only across a contiguous prefix of checkpointed segments.
- next:=w.manifest.FirstSegment;var remove []string
+ if w.closed{return os.ErrClosed}
+ if w.manifest.CheckpointSeq==0{return nil}
+ // A reclaim operation must be backed by the checkpoint committed by MANIFEST.
+ raw,e:=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"));if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
+ var cp Checkpoint
+ if e=json.Unmarshal(raw,&cp);e!=nil{return fmt.Errorf("decode committed checkpoint before reclaim: %w",e)}
+ if cp.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match committed manifest %d",cp.Seq,w.manifest.CheckpointSeq)}
+ next:=w.manifest.FirstSegment
+ var remove []string
  for seg:=w.manifest.FirstSegment;seg<w.manifest.ActiveSegment;seg++{
-  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg));_,e:=os.Stat(p)
-  if os.IsNotExist(e){next=seg+1;continue};if e!=nil{return e}
-  safe:=true;e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq>w.manifest.CheckpointSeq{safe=false};return nil});if e!=nil{return e}
-  if !safe{break};remove=append(remove,p);next=seg+1
+  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
+  if _,e=os.Stat(p);e!=nil{
+   if os.IsNotExist(e){return fmt.Errorf("required segment %d is missing before manifest reclaim boundary advances",seg)}
+   return e
+  }
+  safe:=true
+  e=readFrames(p,func(b []byte)error{
+   var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
+   if r.Seq>w.manifest.CheckpointSeq{safe=false}
+   return nil
+  })
+  if e!=nil{return e}
+  if !safe{break}
+  remove=append(remove,p);next=seg+1
  }
  if next==w.manifest.FirstSegment{return nil}
- old:=w.manifest.FirstSegment;w.manifest.FirstSegment=next
- if e:=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
- for _,p:=range remove{if e:=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
+ old:=w.manifest.FirstSegment
+ w.manifest.FirstSegment=next
+ if e=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
+ // Once MANIFEST is durable, deletion may be resumed safely after a crash.
+ for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
  d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
 }
 func (w *WAL) Close()error{
