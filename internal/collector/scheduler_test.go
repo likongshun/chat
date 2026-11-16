@@ -1,7 +1,8 @@
 package collector
 
-import (\n\t"math/rand"
+import (
 	"context"
+	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
