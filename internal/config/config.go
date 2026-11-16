@@ -190,6 +190,24 @@ func (c Config) Validate() error {
 		if !finite(p.Param1) || !finite(p.Param2) {
 			return fmt.Errorf("point %s: processing parameters must be finite", p.PointCode)
 		}
+		switch p.Operation {
+		case "BIT":
+			if p.Param1 < 0 || p.Param1 > 63 || math.Trunc(p.Param1) != p.Param1 {
+				return fmt.Errorf("point %s: BIT index must be an integer in 0..63", p.PointCode)
+			}
+		case "CLAMP":
+			if p.Param1 > p.Param2 {
+				return fmt.Errorf("point %s: CLAMP minimum exceeds maximum", p.PointCode)
+			}
+		case "ROUND":
+			if p.Param1 < -9 || p.Param1 > 9 || math.Trunc(p.Param1) != p.Param1 {
+				return fmt.Errorf("point %s: ROUND precision must be an integer in -9..9", p.PointCode)
+			}
+		case "DIVIDE":
+			if p.Param1 == 0 {
+				return fmt.Errorf("point %s: DIVIDE divisor cannot be zero", p.PointCode)
+			}
+		}
 	}
 	for _, w := range c.WriteRules {
 		if w.Enabled {
