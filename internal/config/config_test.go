@@ -20,3 +20,14 @@ func TestValidateWorkbookModelPoint(t *testing.T) {
 	}
 	if err := c.Validate(); err != nil { t.Fatal(err) }
 }
+
+func TestLoadRepositoryWorkbook(t *testing.T) {
+	c, err := LoadXLSX("../../configs/modbus_device_config.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Devices) != 1 || len(c.Points) != 2 || len(c.Processing) != 1 || len(c.WriteRules) != 1 || len(c.Enums) != 1 {
+		t.Fatalf("unexpected workbook counts: devices=%d points=%d processing=%d write_rules=%d enums=%d",
+			len(c.Devices), len(c.Points), len(c.Processing), len(c.WriteRules), len(c.Enums))
+	}
+}
