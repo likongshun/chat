@@ -87,8 +87,18 @@ func (s *MQTTSink) Publish(ctx context.Context, events []Event) error {
 				wait = remaining
 			}
 		}
-		if wait <= 0 || !token.WaitTimeout(wait) {
+		if wait <= 0 {
 			return fmt.Errorf("MQTT QoS 1 publish timed out for WAL sequence %d", event.Seq)
+		}
+		completed := make(chan bool, 1)
+		go func() { completed <- token.WaitTimeout(wait) }()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ok := <-completed:
+			if !ok {
+				return fmt.Errorf("MQTT QoS 1 publish timed out for WAL sequence %d", event.Seq)
+			}
 		}
 		if err := token.Error(); err != nil {
 			return fmt.Errorf("MQTT QoS 1 publish failed for WAL sequence %d: %w", event.Seq, err)
