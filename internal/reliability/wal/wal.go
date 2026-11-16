@@ -24,9 +24,10 @@ func Open(o Options)(*WAL,error){
 }
 func (w *WAL) loadManifest()error{
  b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
- if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.CheckpointSeq>0{cp,e:=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"));if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
+ if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
 }
 func (w *WAL) recover()error{
+ if e:=w.cleanupObsoleteSegments();e!=nil{return e}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=uint64(0)
  for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
   e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
@@ -130,13 +131,39 @@ func (w *WAL) Checkpoint(seq uint64)error{
   });if e!=nil{return e}
  }
  cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()}
- b,e:=json.Marshal(cp);if e!=nil{return e}
- if e=atomicFile(filepath.Join(w.opts.Dir,"checkpoint.json"),b);e!=nil{return e}
+ cpPath:=checkpointPath(w.opts.Dir,seq)
+ if _,statErr:=os.Stat(cpPath);os.IsNotExist(statErr){
+  b,e:=json.Marshal(cp);if e!=nil{return e}
+  if e=atomicFile(cpPath,b);e!=nil{return e}
+ }else if statErr!=nil{return statErr}else{
+  existing,e:=os.ReadFile(cpPath);if e!=nil{return e};var saved Checkpoint
+  if e=json.Unmarshal(existing,&saved);e!=nil{return e}
+  if saved.Seq!=seq{return fmt.Errorf("existing checkpoint %d does not match requested %d",saved.Seq,seq)}
+ }
  old:=w.manifest.CheckpointSeq
  w.manifest.CheckpointSeq=seq
  if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;return e}
  return nil
 }
+func checkpointPath(dir string,seq uint64)string{return filepath.Join(dir,fmt.Sprintf("checkpoint-%020d.json",seq))}
+
+// cleanupObsoleteSegments resumes deletion after a crash that occurred after
+// the manifest commit but before every covered segment was unlinked.
+func (w *WAL) cleanupObsoleteSegments()error{
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
+ changed:=false
+ for _,p:=range files{
+  var seg uint64
+  if _,e=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);e!=nil{return e}
+  if seg<w.manifest.FirstSegment{
+   if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}
+   changed=true
+  }
+ }
+ if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()}
+ return nil
+}
+
 func (w *WAL) saveManifest()error{b,e:=json.Marshal(w.manifest);if e!=nil{return e};return atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b)}
 func atomicFile(path string,b []byte)error{
  tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=f.Sync();e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return d.Sync()
@@ -146,7 +173,7 @@ func (w *WAL) Reclaim()error{
  if w.closed{return os.ErrClosed}
  if w.manifest.CheckpointSeq==0{return nil}
  // A reclaim operation must be backed by the checkpoint committed by MANIFEST.
- raw,e:=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"));if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
+ raw,e:=os.ReadFile(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq));if os.IsNotExist(e){raw,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
  var cp Checkpoint
  if e=json.Unmarshal(raw,&cp);e!=nil{return fmt.Errorf("decode committed checkpoint before reclaim: %w",e)}
  if cp.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match committed manifest %d",cp.Seq,w.manifest.CheckpointSeq)}
