@@ -34,6 +34,7 @@ type samplePayload struct {
 	DeviceID  string    `json:"device_id"`
 	Model     string    `json:"model"`
 	PointCode string    `json:"point_code"`
+	Unit      string    `json:"unit"`
 	Timestamp time.Time `json:"timestamp"`
 	Value     any       `json:"value"`
 	Quality   string    `json:"quality"`
@@ -113,7 +114,8 @@ func influxLine(event Event) (string, error) {
 	tags := "device_id=" + escapeTag(sample.DeviceID) +
 		",model=" + escapeTag(sample.Model) +
 		",point_code=" + escapeTag(sample.PointCode) +
-		",quality=" + escapeTag(sample.Quality)
+		",quality=" + escapeTag(sample.Quality) +
+		",unit=" + escapeTag(sample.Unit)
 	fields := make([]string, 0, 3)
 	if sample.Value != nil {
 		value, err := influxFieldValue(sample.Value)
