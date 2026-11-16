@@ -16,6 +16,7 @@ type Sample struct {
 	Model     string    `json:"model"`
 	PointCode string    `json:"point_code"`
 	Unit      string    `json:"unit,omitempty"`
+	ConfigVersion int64 `json:"config_version"`
 	Timestamp time.Time `json:"timestamp"`
 	Value     any       `json:"value,omitempty"`
 	Quality   Quality   `json:"quality"`
