@@ -10,11 +10,12 @@ import (
  "sort"
  "strings"
  "sync"
+	"sync/atomic"
  "syscall"
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error; capacityRejections atomic.Uint64 }
 func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
@@ -83,7 +84,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
   estimate+=int64(len(event.Payload))+256
  }
  usage,e:=w.diskUsage();if e!=nil{return nil,e}
- if usage+estimate>w.opts.MaxBytes-w.opts.ReserveBytes{return nil,ErrCapacity}
+ if usage+estimate>w.opts.MaxBytes-w.opts.ReserveBytes{w.capacityRejections.Add(1);return nil,ErrCapacity}
  if w.data==nil{return nil,os.ErrClosed}
  start,e:=w.data.Seek(0,io.SeekEnd);if e!=nil{return nil,e}
  records:=make([]Record,0,len(events))
@@ -367,7 +368,7 @@ func (w *WAL) Stats()(Stats,error){
  w.mu.Lock()
  stats:=Stats{
   DiskBytes:usage,MaxBytes:w.opts.MaxBytes,
-  PendingRecords:len(pending),SegmentCount:len(ids),
+  PendingRecords:len(pending),SegmentCount:len(ids),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.opts.MaxBytes-w.opts.ReserveBytes,
   CheckpointSeq:w.manifest.CheckpointSeq,
   FirstSegment:w.manifest.FirstSegment,ActiveSegment:w.manifest.ActiveSegment,
  }
