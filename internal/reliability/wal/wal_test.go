@@ -231,3 +231,21 @@ func TestAppendBatchRejectsInvalidInputWithoutConsumingSequence(t *testing.T) {
  record,err:=w.Append("good",json.RawMessage(`{"ok":true}`));if err!=nil{t.Fatal(err)}
  if record.Seq!=1{t.Fatalf("sequence=%d, want 1",record.Seq)}
 }
+
+
+func TestCheckpointReadyAdvancesOnlyFullyACKedPrefix(t *testing.T) {
+ w,err:=Open(Options{Dir:t.TempDir(),SegmentBytes:1,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ first,err:=w.Append("ready-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ second,err:=w.Append("ready-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:first.Seq,Sink:sink,EventID:first.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Ack(Ack{Seq:second.Seq,Sink:"mqtt",EventID:second.EventID});err!=nil{t.Fatal(err)}
+ seq,err:=w.CheckpointReady();if err!=nil{t.Fatal(err)}
+ if seq!=first.Seq{t.Fatalf("checkpoint=%d, want %d",seq,first.Seq)}
+ if err=w.Ack(Ack{Seq:second.Seq,Sink:"influx",EventID:second.EventID});err!=nil{t.Fatal(err)}
+ seq,err=w.CheckpointReady();if err!=nil{t.Fatal(err)}
+ if seq!=second.Seq{t.Fatalf("checkpoint=%d, want %d",seq,second.Seq)}
+ pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
+ if len(pending)!=0{t.Fatalf("pending after checkpoint=%d",len(pending))}
+}
