@@ -35,6 +35,7 @@ type samplePayload struct {
 	Model     string    `json:"model"`
 	PointCode string    `json:"point_code"`
 	Unit      string    `json:"unit"`
+	ConfigVersion int64 `json:"config_version"`
 	Timestamp time.Time `json:"timestamp"`
 	Value     any       `json:"value"`
 	Quality   string    `json:"quality"`
@@ -134,6 +135,7 @@ func influxLine(event Event) (string, error) {
 		fields = append(fields, "value="+value)
 	}
 	fields = append(fields, "wal_seq="+strconv.FormatUint(event.Seq, 10)+"i")
+	fields = append(fields, "config_version="+strconv.FormatInt(sample.ConfigVersion, 10)+"i")
 	if sample.Error != "" {
 		fields = append(fields, "error="+strconv.Quote(sample.Error))
 	}
