@@ -54,6 +54,9 @@ func Apply(pointCode string, value any, rules []config.Processing, enums []confi
 			if err != nil {
 				return nil, err
 			}
+			if math.Trunc(n) != n {
+				return nil, fmt.Errorf("point %s: BIT requires an integer input", pointCode)
+			}
 			bit := uint(rule.Param1)
 			current = uint64(n)&(uint64(1)<<bit) != 0
 		case "ROUND":
