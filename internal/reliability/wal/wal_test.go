@@ -5,6 +5,7 @@ import (
  "errors"
  "os"
  "path/filepath"
+ "strings"
  "testing"
  "time"
 )
@@ -268,4 +269,20 @@ func TestCheckpointReadyRetriesACKCompactionAfterManifestCommit(t *testing.T) {
  after,err:=os.Stat(filepath.Join(dir,"ack.wal"));if err!=nil{t.Fatal(err)}
  if after.Size()!=0{t.Fatalf("ACK log size after recovery compaction=%d, want 0",after.Size())}
  if err=w.Close();err!=nil{t.Fatal(err)}
+}
+
+
+func TestWALStatsExposePendingCapacityAndSegments(t *testing.T) {
+ w,err:=Open(Options{Dir:t.TempDir(),SegmentBytes:1,MaxBytes:2048,ReserveBytes:512,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ if _,err=w.Append("stats-event",json.RawMessage(`{"v":1}`));err!=nil{t.Fatal(err)}
+ tooLarge,_:=json.Marshal(strings.Repeat("x",4096))
+ if _,err=w.Append("too-large",tooLarge);!errors.Is(err,ErrCapacity){t.Fatalf("expected capacity rejection, got %v",err)}
+ stats,err:=w.Stats();if err!=nil{t.Fatal(err)}
+ if stats.PendingRecords!=1{t.Fatalf("pending=%d, want 1",stats.PendingRecords)}
+ if stats.CapacityRejections!=1{t.Fatalf("capacity rejections=%d, want 1",stats.CapacityRejections)}
+ if stats.AdmissionLimitBytes!=1536{t.Fatalf("admission limit=%d, want 1536",stats.AdmissionLimitBytes)}
+ if stats.DiskBytes<=0||stats.DiskUsedRatio<=0{t.Fatalf("invalid disk stats: %+v",stats)}
+ if stats.SegmentCount<2{t.Fatalf("segment count=%d, want rotated segments",stats.SegmentCount)}
 }
