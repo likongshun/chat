@@ -17,7 +17,7 @@ docker compose logs -f collector
 
 See [Docker Compose deployment](docs/DOCKER_COMPOSE.md) for volumes, operations, and production hardening.
 
-The current collector reads the Excel configuration, polls enabled Modbus TCP devices, and batches samples into the local WAL. MQTT and InfluxDB containers are provisioned by Compose but their delivery adapters and replay worker are not yet integrated into the application. The anonymous Mosquitto configuration is development-only.
+The current collector reads the Excel configuration, polls enabled Modbus TCP devices, batches samples into the local WAL, and replays pending records to MQTT (QoS 1) and InfluxDB v2 with independent durable ACKs. The anonymous Mosquitto configuration is development-only.
 
 ## Local development
 
