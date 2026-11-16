@@ -31,6 +31,7 @@ Repository: `https://github.com/likongshun/chat`
 ### Durability baseline
 - The WAL format and crash-consistency contract are documented in `docs/WAL_FORMAT.md`.
 - Frame writes now handle short writes; frame readers reject invalid lengths/checksums; active data/ACK logs repair incomplete physical tails before append.
+- A reusable segmented log writer with deterministic segment naming, rotation, reopen, and directory sync is present with unit coverage; it is not yet wired into the main WAL/manifest lifecycle.
 - ACK validation checks the referenced sequence and exact event ID before persisting the ACK.
 - Linux opens preallocate a dedicated `ack.reserve` file with `fallocate`; ACK write/sync ENOSPC paths attempt to release the reserve and retry.
 - This remains an incremental hardening step, not completion of the approved segmented Data WAL + segmented ACK WAL + checkpoint snapshot + manifest commit protocol. The current WAL still uses the legacy data/ACK layout and old checkpoint/reclaim implementation.
@@ -38,7 +39,7 @@ Repository: `https://github.com/likongshun/chat`
 
 ## Verification status
 
-Source changes are committed to `main`. The current execution environment cannot reach GitHub to clone the repository or download Go dependencies, and no successful GitHub Actions result has been confirmed. Therefore compilation, unit tests, race tests, device interoperability, crash recovery, and load tests are **not yet verified**.
+Source changes are committed to `main`. GitHub Actions initially failed before compilation because the repository had no `go.sum`; the workflows now run `go mod tidy` before verification. A new run is in progress for the latest commit. Therefore compilation, unit tests, race tests, device interoperability, crash recovery, and load tests are **not yet verified** until that run completes successfully.
 
 ## Remaining work in sequence
 
