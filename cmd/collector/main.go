@@ -32,6 +32,10 @@ func main() {
 		defer configRepo.Close()
 	}
 	log.Printf("configuration loaded: version=%d devices=%d points=%d", configVersion, len(cfg.Devices), len(cfg.Points))
+	configManager, err := config.NewManager(cfg)
+	if err != nil {
+		log.Fatalf("initialize configuration manager: %v", err)
+	}
 
 	dir := envString("WAL_DIR", "./data/wal")
 	store, err := wal.Open(wal.Options{
@@ -46,7 +50,7 @@ func main() {
 	}
 
 	poller := &collector.ModbusPoller{
-		Config: cfg,
+		Config: *configManager.Current(),
 		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
@@ -94,6 +98,8 @@ func main() {
 	if err != nil {
 		log.Printf("InfluxDB sink disabled: %v; records will remain in WAL", err)
 	}
+	deliveryCtx, cancelDelivery := context.WithCancel(context.Background())
+	defer cancelDelivery()
 	var deliveryDone chan error
 	if influxSink != nil {
 		deliveryDone = make(chan error, 1)
@@ -106,18 +112,18 @@ func main() {
 			Metrics: deliveryMetrics,
 			OnError: func(err error) { log.Printf("delivery retry: %v", err) },
 		}
-		go func() { deliveryDone <- worker.Run(ctx) }()
+		go func() { deliveryDone <- worker.Run(deliveryCtx) }()
 	} else {
 		log.Printf("downstream delivery is not configured; WAL will buffer samples")
 	}
-	results := engine.Run(ctx, cfg.Devices)
-	log.Printf("collector started: devices=%d points=%d WAL=%s workers=%d",
-		len(cfg.Devices), len(cfg.Points), dir, envInt("POLL_WORKERS", 500))
-
-	if err := pipeline.PersistResults(ctx, results, store); err != nil {
-		log.Printf("persist collection result: %v; stopping collection", err)
-		stop()
+	updates := make(chan configUpdate, 1)
+	if configRepo != nil {
+		go watchActiveConfiguration(ctx, configRepo, configVersion, envDuration("CONFIG_RELOAD_INTERVAL", 5*time.Second), updates)
 	}
+	if err := runCollection(ctx, engine, poller, configManager, cfg, configVersion, store, updates); err != nil {
+		log.Printf("collection stopped: %v", err)
+	}
+	cancelDelivery()
 	stop()
 	if err := <-observabilityDone; err != nil {
 		log.Printf("observability server: %v", err)
@@ -133,6 +139,144 @@ func main() {
 	}
 	if err := store.Close(); err != nil {
 		log.Printf("close WAL: %v", err)
+	}
+}
+
+type configUpdate struct {
+	Config config.Config
+	Version int64
+}
+
+func runCollection(
+	ctx context.Context,
+	engine *collector.Engine,
+	poller *collector.ModbusPoller,
+	manager *config.Manager,
+	cfg config.Config,
+	version int64,
+	store *wal.WAL,
+	updates <-chan configUpdate,
+) error {
+	for {
+		if !hasEnabledDevices(cfg.Devices) {
+			select {
+			case <-ctx.Done():
+				return nil
+			case update := <-updates:
+				if err := manager.Reload(update.Config); err != nil {
+					log.Printf("reject configuration version %d: %v", update.Version, err)
+					continue
+				}
+				cfg = *manager.Current()
+				poller.Config = cfg
+				poller.ConfigVersion = update.Version
+				version = update.Version
+				log.Printf("activated configuration version %d", version)
+				continue
+			}
+		}
+
+		pollCtx, cancelPoll := context.WithCancel(ctx)
+		results := engine.Run(pollCtx, cfg.Devices)
+		writerCtx, cancelWriter := context.WithCancel(context.Background())
+		persistDone := make(chan error, 1)
+		go func() { persistDone <- pipeline.PersistResults(writerCtx, results, store) }()
+
+		select {
+		case <-ctx.Done():
+			cancelPoll()
+			drainTimer := time.NewTimer(envDuration("PERSIST_DRAIN_TIMEOUT", 30*time.Second))
+			var persistErr error
+			select {
+			case persistErr = <-persistDone:
+			case <-drainTimer.C:
+				cancelWriter()
+				persistErr = <-persistDone
+				log.Printf("WAL writer drain timed out during shutdown")
+			}
+			if !drainTimer.Stop() {
+				select { case <-drainTimer.C: default: }
+			}
+			cancelWriter()
+			_ = engine.Close()
+			if persistErr != nil && !errors.Is(persistErr, context.Canceled) {
+				log.Printf("final WAL drain: %v", persistErr)
+			}
+			return nil
+
+		case update := <-updates:
+			cancelPoll()
+			persistErr := <-persistDone
+			cancelWriter()
+			if persistErr != nil {
+				_ = engine.Close()
+				return fmt.Errorf("flush samples before configuration switch: %w", persistErr)
+			}
+			if err := engine.Close(); err != nil {
+				log.Printf("close clients before config switch: %v", err)
+			}
+			if err := manager.Reload(update.Config); err != nil {
+				log.Printf("reject configuration version %d: %v", update.Version, err)
+				continue
+			}
+			cfg = *manager.Current()
+			poller.Config = cfg
+			poller.ConfigVersion = update.Version
+			version = update.Version
+			log.Printf("activated configuration version %d; devices=%d points=%d", version, len(cfg.Devices), len(cfg.Points))
+
+		case persistErr := <-persistDone:
+			cancelPoll()
+			cancelWriter()
+			_ = engine.Close()
+			if persistErr != nil {
+				return persistErr
+			}
+			// A scheduler with no enabled devices closes immediately; wait for
+			// either a new DB version or process shutdown instead of spinning.
+			if !hasEnabledDevices(cfg.Devices) {
+				continue
+			}
+			return fmt.Errorf("collection result stream closed unexpectedly")
+		}
+	}
+}
+
+func hasEnabledDevices(devices []config.Device) bool {
+	for _, device := range devices {
+		if device.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
+func watchActiveConfiguration(ctx context.Context, repository *configstore.Repository, currentVersion int64, interval time.Duration, updates chan<- configUpdate) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cfg, version, err := repository.LoadActive(ctx)
+			if err != nil {
+				log.Printf("configuration version poll failed: %v", err)
+				continue
+			}
+			if version == currentVersion {
+				continue
+			}
+			select {
+			case updates <- configUpdate{Config: cfg, Version: version}:
+				currentVersion = version
+			case <-ctx.Done():
+				return
+			}
+		}
 	}
 }
 
