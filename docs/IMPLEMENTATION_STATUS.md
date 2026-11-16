@@ -45,7 +45,7 @@ Remaining WAL gaps:
 - No production durability guarantee should be claimed until these gaps and target-filesystem fault tests are closed.
 
 ### Stage 4 — downstream delivery (not integrated)
-- A basic Sink/Dispatcher interface exists.
+- A basic Sink/Dispatcher interface exists. Scheduler results are now serialized and batch-appended to WAL with a 10 ms / 1,000-record batching bound.
 - MQTT QoS 1 and InfluxDB adapters, live WAL replay loop, and end-to-end delivery are not yet integrated.
 - Current collector command loads Excel configuration and opens WAL, then waits for shutdown; it does not yet run the Modbus polling pipeline.
 
@@ -60,7 +60,7 @@ Remaining WAL gaps:
 
 - Commit `31ac68b74368942f8b285b53ebd4ce347ca399e1` passed Go CI, Docker Compose configuration validation, and Docker image build.
 - WAL changes after that commit are undergoing their own Go CI runs; do not infer their result from the earlier successful run.
-- Unit tests now cover lock exclusion, ACK validation, torn active-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, and per-sink pending state. The newest changes still require a successful CI run.
+- Unit tests cover lock exclusion, ACK validation and identity recovery, torn active-tail repair, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, per-sink pending state, batch append, and scheduler-to-WAL persistence. The newest changes still require a successful CI run.
 - No physical Modbus device interoperability test, process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work in sequence
