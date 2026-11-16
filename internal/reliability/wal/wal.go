@@ -19,7 +19,7 @@ func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
  w:=&WAL{opts:o,lock:l,next:1};fail:=func(e error)(*WAL,error){l.close();return nil,e}
- if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil{return fail(err)}
+ if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil&&!errors.Is(err,syscall.ENOSPC){return fail(err)}
  if err=w.loadManifest();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
 }
 func (w *WAL) loadManifest()error{
@@ -28,7 +28,7 @@ func (w *WAL) loadManifest()error{
 }
 func (w *WAL) recover()error{
  if e:=w.cleanupObsoleteSegments();e!=nil{return e}
- files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=uint64(0)
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=w.manifest.CheckpointSeq
  for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
   e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
  }
@@ -45,6 +45,7 @@ func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.D
 func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
  w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed}
  usage,e:=w.diskUsage();if e!=nil{return Record{},e};if usage+int64(len(payload))+256>w.opts.MaxBytes-w.opts.ReserveBytes{return Record{},ErrCapacity}
+ if w.data==nil{return Record{},os.ErrClosed}
  r:=Record{Seq:w.next,EventID:eventID,Payload:payload,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(r);if e!=nil{return Record{},e}
  if e=writeFrame(w.data,b);e!=nil{return Record{},e};if w.opts.Sync{if e=w.data.Sync();e!=nil{return Record{},e}};w.next++
  st,e:=w.data.Stat();if e!=nil{return r,e};if st.Size()>=w.opts.SegmentBytes{if e=w.rotate();e!=nil{return r,e}};return r,nil
