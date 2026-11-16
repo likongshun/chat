@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/likongshun/chat/internal/reliability/wal"
@@ -132,9 +131,3 @@ func waitContext(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-// DeliveryCounters is a small helper for integration tests and simple
-// operational instrumentation without coupling the worker to a metrics vendor.
-type DeliveryCounters struct {
-	Published atomic.Uint64
-	Failed    atomic.Uint64
-}
