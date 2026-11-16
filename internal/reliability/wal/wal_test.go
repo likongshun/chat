@@ -91,9 +91,10 @@ func TestUncommittedCheckpointDoesNotReplaceCommittedGeneration(t *testing.T) {
  oldManifest,err:=os.ReadFile(filepath.Join(dir,"MANIFEST"));if err!=nil{t.Fatal(err)}
  r2,err:=w.Append("evt-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
  for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r2.Seq,Sink:sink,EventID:r2.EventID});err!=nil{t.Fatal(err)}}
- if err=w.Checkpoint(r2.Seq);err!=nil{t.Fatal(err)}
+ orphan,e:=json.Marshal(Checkpoint{Seq:r2.Seq,CreatedAt:time.Now().UTC()});if e!=nil{t.Fatal(e)}
+ if err=atomicFile(checkpointPath(dir,r2.Seq),orphan);err!=nil{t.Fatal(err)}
  if err=w.Close();err!=nil{t.Fatal(err)}
- // Simulate a crash before the second manifest commit: old MANIFEST remains authoritative.
+ // Simulate a crash after writing the new checkpoint but before committing MANIFEST.
  if err=os.WriteFile(filepath.Join(dir,"MANIFEST"),oldManifest,0600);err!=nil{t.Fatal(err)}
  w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096})
  if err!=nil{t.Fatalf("old committed checkpoint must remain recoverable: %v",err)}
