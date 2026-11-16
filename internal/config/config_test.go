@@ -31,3 +31,25 @@ func TestLoadRepositoryWorkbook(t *testing.T) {
 			len(c.Devices), len(c.Points), len(c.Processing), len(c.WriteRules), len(c.Enums))
 	}
 }
+
+func TestManagerReloadFailureKeepsLastGoodSnapshot(t *testing.T) {
+	var manager Manager
+	if err := manager.ReloadXLSX("../../configs/modbus_device_config.xlsx"); err != nil {
+		t.Fatal(err)
+	}
+	before := manager.Current()
+	if before == nil || len(before.Points) != 2 {
+		t.Fatalf("unexpected initial snapshot: %#v", before)
+	}
+	if err := manager.ReloadXLSX("does-not-exist.xlsx"); err == nil {
+		t.Fatal("expected reload error")
+	}
+	after := manager.Current()
+	if after == nil || len(after.Points) != 2 {
+		t.Fatalf("failed reload replaced last-known-good snapshot: %#v", after)
+	}
+	after.Points[0].PointCode = "mutated"
+	if manager.Current().Points[0].PointCode == "mutated" {
+		t.Fatal("Current returned mutable internal snapshot")
+	}
+}
