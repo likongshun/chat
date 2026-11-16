@@ -111,11 +111,16 @@ func influxLine(event Event) (string, error) {
 	if sample.DeviceID == "" || sample.PointCode == "" || sample.Timestamp.IsZero() {
 		return "", fmt.Errorf("event %d is missing device_id, point_code or timestamp", event.Seq)
 	}
-	tags := "device_id=" + escapeTag(sample.DeviceID) +
-		",model=" + escapeTag(sample.Model) +
-		",point_code=" + escapeTag(sample.PointCode) +
-		",quality=" + escapeTag(sample.Quality) +
-		",unit=" + escapeTag(sample.Unit)
+	tags := []string{"device_id=" + escapeTag(sample.DeviceID), "point_code=" + escapeTag(sample.PointCode)}
+	if sample.Model != "" {
+		tags = append(tags, "model="+escapeTag(sample.Model))
+	}
+	if sample.Quality != "" {
+		tags = append(tags, "quality="+escapeTag(sample.Quality))
+	}
+	if sample.Unit != "" {
+		tags = append(tags, "unit="+escapeTag(sample.Unit))
+	}
 	fields := make([]string, 0, 3)
 	if sample.Value != nil {
 		value, err := influxFieldValue(sample.Value)
@@ -131,7 +136,7 @@ func influxLine(event Event) (string, error) {
 	if sample.Value == nil && sample.Error == "" {
 		return "", fmt.Errorf("event %d has neither value nor error", event.Seq)
 	}
-	return "modbus_point," + tags + " " + strings.Join(fields, ",") + " " + strconv.FormatInt(sample.Timestamp.UTC().UnixNano(), 10), nil
+	return "modbus_point," + strings.Join(tags, ",") + " " + strings.Join(fields, ",") + " " + strconv.FormatInt(sample.Timestamp.UTC().UnixNano(), 10), nil
 }
 
 func influxFieldValue(value any) (string, error) {
