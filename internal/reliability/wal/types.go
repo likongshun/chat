@@ -18,3 +18,8 @@ type PendingRecord struct {
  MQTTAcked bool
  InfluxAcked bool
 }
+
+type AppendInput struct {
+ EventID string
+ Payload json.RawMessage
+}
