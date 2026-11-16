@@ -16,6 +16,7 @@ import (
 
 type ModbusPoller struct {
 	Config  config.Config
+	ConfigVersion int64
 	Timeout time.Duration
 	MaxGap  uint16
 
