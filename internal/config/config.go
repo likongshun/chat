@@ -144,8 +144,8 @@ func (c Config) Validate() error {
 		} else if p.Function >= 3 && p.Count != width {
 			return fmt.Errorf("point %s: %s requires %d registers, got %d", key, p.DataType, width, p.Count)
 		}
-		if p.Function <= 2 && p.DataType != "BOOL" {
-			return fmt.Errorf("point %s: FC01/FC02 points must use BOOL", key)
+		if p.Function <= 2 && (p.DataType != "BOOL" || p.Count != 1) {
+			return fmt.Errorf("point %s: FC01/FC02 points must map exactly one BOOL bit", key)
 		}
 		if p.Function >= 3 && p.DataType == "BOOL" {
 			return fmt.Errorf("point %s: BOOL must use FC01/FC02", key)
