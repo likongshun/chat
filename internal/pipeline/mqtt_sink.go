@@ -54,15 +54,9 @@ func NewMQTTSink(options MQTTOptions) (*MQTTSink, error) {
 	}
 
 	client := mqtt.NewClient(clientOptions)
-	token := client.Connect()
-	if !token.WaitTimeout(options.Timeout) {
-		client.Disconnect(250)
-		return nil, fmt.Errorf("MQTT connection timed out after %s", options.Timeout)
-	}
-	if err := token.Error(); err != nil {
-		client.Disconnect(250)
-		return nil, fmt.Errorf("connect MQTT broker: %w", err)
-	}
+	// ConnectRetry keeps attempting in the background if the broker is not
+	// ready yet; the WAL remains authoritative while delivery is unavailable.
+	client.Connect()
 	return &MQTTSink{client: client, topic: options.Topic, timeout: options.Timeout}, nil
 }
 
