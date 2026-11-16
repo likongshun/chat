@@ -12,3 +12,9 @@ type Record struct { Seq uint64 `json:"seq"`; EventID string `json:"event_id"`; 
 type Ack struct { Seq uint64 `json:"seq"`; Sink string `json:"sink"`; EventID string `json:"event_id"` }
 type Manifest struct { Version int `json:"version"`; CheckpointSeq uint64 `json:"checkpoint_seq"`; FirstSegment uint64 `json:"first_segment"`; ActiveSegment uint64 `json:"active_segment"` }
 type Checkpoint struct { Seq uint64 `json:"seq"`; CreatedAt time.Time `json:"created_at"` }
+
+type PendingRecord struct {
+ Record
+ MQTTAcked bool
+ InfluxAcked bool
+}
