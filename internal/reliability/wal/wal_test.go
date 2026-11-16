@@ -249,3 +249,23 @@ func TestCheckpointReadyAdvancesOnlyFullyACKedPrefix(t *testing.T) {
  pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
  if len(pending)!=0{t.Fatalf("pending after checkpoint=%d",len(pending))}
 }
+
+
+func TestCheckpointReadyRetriesACKCompactionAfterManifestCommit(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ r,err:=w.Append("crash-ack-compact",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r.Seq,Sink:sink,EventID:r.EventID});err!=nil{t.Fatal(err)}}
+ // Simulate a crash after MANIFEST commit but before ACK log compaction.
+ cp,err:=json.Marshal(Checkpoint{Seq:r.Seq,CreatedAt:time.Now().UTC()});if err!=nil{t.Fatal(err)}
+ if err=atomicFile(checkpointPath(dir,r.Seq),cp);err!=nil{t.Fatal(err)}
+ w.manifest.CheckpointSeq=r.Seq
+ if err=w.saveManifest();err!=nil{t.Fatal(err)}
+ before,err:=os.Stat(filepath.Join(dir,"ack.wal"));if err!=nil{t.Fatal(err)}
+ if before.Size()==0{t.Fatal("test setup expected un-compacted ACK log")}
+ if _,err=w.CheckpointReady();err!=nil{t.Fatal(err)}
+ after,err:=os.Stat(filepath.Join(dir,"ack.wal"));if err!=nil{t.Fatal(err)}
+ if after.Size()!=0{t.Fatalf("ACK log size after recovery compaction=%d, want 0",after.Size())}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+}
