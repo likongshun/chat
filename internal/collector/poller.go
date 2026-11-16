@@ -58,7 +58,7 @@ func (p *ModbusPoller) Poll(ctx context.Context, d config.Device) ([]Sample, err
 		for _, span := range batch.Spans {
 			point := byCode[span.PointCode]
 			sample := Sample{
-				DeviceID:d.ID, Model:d.Model, PointCode:point.PointCode, Unit:point.Unit,
+				DeviceID:d.ID, Model:d.Model, PointCode:point.PointCode, Unit:point.Unit, ConfigVersion:p.ConfigVersion,
 				Timestamp:now, Quality:QualityGood,
 			}
 			sample.EventID = fmt.Sprintf("%s/%s/%d", d.ID, point.PointCode, now.UnixNano())
