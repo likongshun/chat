@@ -1,27 +1,28 @@
-# WAL on-disk format and crash-consistency contract
+# WAL format and crash-consistency contract
 
-This document defines the durable storage contract for Stage 4. It supersedes the early single-directory WAL scaffold. The implementation must not be described as production-safe until the fault-injection tests in this document's companion test plan pass on the target filesystem.
+This document describes the current WAL implementation in this repository and explicitly separates implemented guarantees from the remaining production-hardening work.
 
-## Directory layout
+## Current on-disk layout
 
 ```text
 data/wal/
   .wal.lock
   MANIFEST
   MANIFEST.tmp
-  checkpoint-000012.tmp
-  checkpoint-000012.chk
-  segment-000001.wal
-  segment-000002.wal
-  ack/
-    ack-000001.wal
-  reserve/
-    ack.reserve
+  checkpoint-00000000000000000012.json
+  checkpoint-00000000000000000012.json.tmp
+  data-00000000000000000001.wal
+  data-00000000000000000002.wal
+  ack.wal
+  ack.wal.tmp
+  ack.reserve
 ```
 
-All files are owned by one process at a time. The process obtains an exclusive OS file lock on `.wal.lock` before reading or mutating any WAL state and holds it until close. Temporary files are never authoritative.
+The current implementation uses segmented Data WAL files and one ACK WAL file. It does **not** yet use segmented ACK WAL files or a dedicated `ack/` and `reserve/` directory hierarchy.
 
-## Framing
+The process obtains an exclusive OS lock on `.wal.lock` before recovery and holds it until close. Temporary files are not authoritative.
+
+## Frame format
 
 Data and ACK logs use the same frame envelope:
 
@@ -31,17 +32,19 @@ Data and ACK logs use the same frame envelope:
 | 4 | 4 bytes | CRC32-IEEE of payload |
 | 8 | N bytes | UTF-8 JSON payload |
 
-A frame length of zero or greater than 64 MiB is invalid. A short header or short payload at the physical end of the active log is a torn tail and is truncated to the last complete valid frame before append. A CRC mismatch in the middle of a segment is corruption and must fail recovery; it must not be silently skipped. The same rule applies to ACK logs. Writes must handle short writes and return errors.
+A frame length of zero or greater than 64 MiB is invalid. Short headers or payloads at the physical end of the active Data/ACK log are truncated to the last complete valid frame and the repaired file is synced before recovery continues. A complete frame with a bad checksum is treated as corruption and recovery fails.
+
+Writes handle short writes. Data records require a non-empty event ID and JSON payload.
 
 ## Data record
 
-Each data frame contains a JSON `Record` with:
+Each Data frame contains:
 - `seq`: globally increasing, non-zero sequence number;
 - `event_id`: stable, non-empty idempotency key;
 - `payload`: original event payload;
 - `created_at`: UTC timestamp.
 
-Sequence numbers are assigned under the WAL mutex. A batch append is all-or-error at the API boundary; a partially written final frame is repaired on restart. A caller may treat a record as durable only after the configured sync boundary succeeds.
+Sequence assignment occurs under the WAL mutex. A record is accepted only after the configured append sync boundary succeeds.
 
 ## ACK record
 
@@ -50,65 +53,60 @@ Each ACK frame contains:
 - `event_id`: exact event ID of that record;
 - `sink`: exactly `mqtt` or `influx`.
 
-An ACK is durable only after its ACK log sync succeeds. Duplicate ACKs are idempotent. Unknown sequence numbers, event-ID mismatches, and unsupported sinks are rejected. MQTT and InfluxDB acknowledgements are independent; a record is reclaimable only when both are durable.
+An ACK is durable only after ACK WAL sync succeeds. MQTT and InfluxDB states are independent. Recovery validates ACK JSON, sink names, sequence references, and event IDs against retained data records. Duplicate ACKs are safe but may occupy extra log space until checkpoint compaction.
 
-## Checkpoint
+`PendingWithAcks()` returns each pending record together with `MQTTAcked` and `InfluxAcked`. A dispatcher must publish only to sinks that have not acknowledged that event.
 
-A checkpoint is a complete snapshot of the uncompleted data records at a frozen sequence boundary. It includes each retained record and its per-sink ACK state, plus the checkpoint sequence and creation time. The checkpoint must be self-validating (version and checksum). The checkpoint is not authoritative merely because its file exists.
+## Checkpoint semantics currently implemented
 
-## Manifest
+The current checkpoint is a **fully acknowledged sequence prefix**, not a snapshot containing pending records:
 
-The manifest is the commit point for checkpoint advancement and segment reclamation. It contains:
-- format version;
-- checkpoint sequence;
-- checkpoint filename and checksum;
-- first segment still required after the checkpoint;
-- active data segment;
-- active ACK segment.
+1. Sync the active Data and ACK logs.
+2. Verify that every record in the newly covered range has both MQTT and Influx ACKs.
+3. Write an immutable `checkpoint-<seq>.json.tmp`, sync it, rename it to its sequence-specific final name, and sync the directory.
+4. Update `MANIFEST.tmp`, sync it, atomically rename it to `MANIFEST`, and sync the WAL directory.
+5. After the manifest commit, compact `ack.wal` to retain only ACK records with sequence numbers greater than the committed checkpoint boundary.
 
-Manifest replacement uses a temporary file, file sync, atomic rename, then parent-directory sync. Recovery trusts only the last fully committed `MANIFEST`; orphan temporary files and unreferenced checkpoints are ignored.
+Versioned checkpoint filenames are important: a checkpoint written before a failed manifest commit must not overwrite the checkpoint referenced by the old manifest. Orphan checkpoint generations are ignored.
 
-## Required checkpoint and reclaim ordering
+ACK compaction happens only after the manifest commit. If the process crashes before compaction, the old ACK log is still safe. If it crashes after compaction, all ACK state at or below the boundary is already represented by the committed fully-ACKed prefix; later ACKs are retained. If compaction cannot complete, the checkpoint is committed but the call returns an error explaining that ACK compaction failed.
 
-1. Acquire and hold the exclusive WAL lock before recovery.
-2. Freeze the sequence boundary while holding the WAL mutex.
-3. Build a complete checkpoint containing all records not fully acknowledged at or below that boundary, including both sink states.
-4. Write the checkpoint temporary file, sync it, close it, and rename it to its final name.
-5. Sync the checkpoint directory.
-6. Write `MANIFEST.tmp` with the checkpoint name/checksum and new segment boundaries.
-7. Sync and close `MANIFEST.tmp`, atomically rename it to `MANIFEST`, then sync the WAL directory.
-8. Only after step 7 succeeds may segments wholly covered by the committed checkpoint be deleted.
-9. Sync the WAL directory after segment deletion.
+The manifest currently records format version, checkpoint sequence, first required Data segment, and active Data segment. It does not yet contain a checkpoint checksum or explicit checkpoint filename; the checkpoint filename is derived from the sequence and the checkpoint sequence is checked during recovery.
 
-A failure before the manifest commit leaves the old manifest and old segments authoritative. A failure after manifest commit leaves the new checkpoint authoritative even if old segments remain. Recovery uses the committed checkpoint and only replays data events beyond its sequence boundary. Partial deletion after manifest commit is safe and may be completed on the next open.
+## Recovery and reclaim order
 
-Segment deletion is never decided from filenames alone. A segment is removable only when every record in it is represented by the committed checkpoint boundary and the checkpoint preserves all still-pending records and ACK states.
+- Acquire the exclusive WAL lock before any recovery.
+- Repair torn tails in the active Data and ACK files before scanning.
+- Verify that every Data segment in the manifest's inclusive `[first_segment, active_segment]` range exists.
+- Validate Data records and ACK references; fail closed on malformed frames, malformed JSON, missing segments, or mismatched event IDs.
+- Initialize the next sequence from the maximum of the committed checkpoint sequence and retained Data records, preventing sequence reuse after old segments have been deleted.
+- Reclaim only complete, non-active Data segments whose every record is at or below the committed checkpoint boundary.
+- Commit the advanced `first_segment` in MANIFEST before unlinking covered segments.
+- Sync the WAL directory after deletion.
+- On the next open, remove leftover segment files below the committed `first_segment` boundary. This resumes cleanup after a crash during partial deletion.
 
-## Disk-full behavior and ACK reserve
+A missing segment inside the manifest's required range is a recovery error. Reclaim does not silently skip it or advance the boundary.
 
-Data admission and ACK durability use separate capacity budgets. The ACK reserve is a real preallocated file (Linux `fallocate` where supported), not merely a logical subtraction from the data budget. Ordinary data appends must never consume this reserve.
+## Disk-full behavior currently implemented
 
-When the data budget or filesystem stop watermark is reached, new data appends are rejected, but ACK append/sync, recovery, checkpointing, and reclaim remain available. ACK reserve exhaustion is a critical durability fault: do not report delivery completion, do not mark the in-memory ACK state durable, and do not reclaim the corresponding data. Raise a critical health/metrics signal.
+- Data admission enforces a configured WAL byte budget and reserves a separate logical capacity budget for ACK space.
+- Linux preallocates `ack.reserve` using `fallocate`.
+- If reserve allocation returns ENOSPC during open, recovery is still allowed to proceed; ACK durability may remain unavailable until space is freed.
+- On ACK write/sync ENOSPC, the reserve file is released and the ACK operation is retried.
+- The reserve is attempted again on the next process open; automatic reserve replenishment and filesystem-wide watermarks are not yet implemented.
+- A failed ACK is never reported as durable and cannot authorize checkpointing.
 
-The reserve size must be sized from the maximum outstanding records, maximum ACK frame size, rotation overhead, and filesystem behavior; 64 MiB is only an initial example, not a universal safe value.
+## Remaining production-hardening work
 
-## Capacity and observability
+The following items are **not complete** and must not be assumed from the current implementation:
 
-Enforce both configured WAL maximum bytes and filesystem usage watermarks. Initial defaults: warning 70%, critical 85%, stop 95%. At stop, reject new data while preserving ACK and cleanup paths.
+- Segmented ACK WAL and a checkpoint snapshot with explicit pending-record and per-sink ACK state.
+- Manifest checksum, explicit checkpoint filename/checksum, and format migration tooling.
+- Automatic ACK reserve replenishment and tested disk-full behavior on the target filesystem.
+- Filesystem usage watermarks (warning/critical/stop) and capacity health metrics.
+- Unified fsync instrumentation for Data, ACK, checkpoint, manifest, and directory sync paths.
+- Process-kill fault injection at every checkpoint/manifest/unlink boundary.
+- Real disk-full and reserve-exhaustion tests.
+- Long-running soak tests and target-storage benchmarks.
 
-All sync operations (data, ACK, checkpoint, manifest, and directory sync) must use one instrumentation wrapper. Export count, errors, total/max and rolling p50/p95/p99 latency, including:
-- `modbus_wal_fsync_duration_seconds`;
-- `modbus_wal_fsync_errors_total`;
-- `modbus_wal_fsync_p99_seconds`;
-- `modbus_wal_disk_used_ratio`;
-- `modbus_wal_disk_level`;
-- `modbus_wal_capacity_rejections_total`;
-- `modbus_wal_pending_records`.
-
-A p99 fsync latency above 50 ms is an initial alert threshold only; production thresholds require measurements on the deployment storage.
-
-## Recovery and fault-injection acceptance
-
-Tests must terminate a subprocess at each persistence boundary: checkpoint temp write, checkpoint sync, checkpoint rename, checkpoint directory sync, manifest temp write, manifest sync, manifest rename, manifest directory sync, each segment unlink, and post-unlink directory sync. After restart, recovery must produce no lost acknowledged state, no lost pending record, and no duplicate sequence assignment.
-
-Additional tests must cover torn tails, middle-of-file CRC corruption, duplicate ACK, invalid ACK identity, ACK-only ENOSPC, data-capacity exhaustion while ACK/reclaim still progress, reserve exhaustion, partial segment deletion, lock exclusion, and repeated recovery idempotence.
+The current WAL has unit tests for locking, ACK validation, torn-tail repair, checkpoint ordering, sequence continuity after reclaim, partial deletion recovery, and independent sink ACK state. These tests do not replace process-kill fault injection or production filesystem testing.
