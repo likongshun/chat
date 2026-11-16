@@ -72,9 +72,13 @@ func (c *Client) request(ctx context.Context, unit, fn byte, payload []byte) ([]
 	deadline := time.Now().Add(c.timeout())
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) { deadline = d }
 	if err := conn.SetDeadline(deadline); err != nil { c.discardConn(); return nil, err }
-	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
+	cancelDone := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+		close(cancelDone)
+	})
 	defer func() {
-		stop()
+		if !stop() { <-cancelDone }
 		_ = conn.SetDeadline(time.Time{})
 	}()
 
