@@ -187,8 +187,9 @@ func (w *WAL) compactAckLog(boundary uint64)error{
   w.ack,_=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
   return e
  }
- d,e:=os.Open(w.opts.Dir);if e!=nil{return e}
- syncErr:=d.Sync();_ = d.Close()
+ d,e:=os.Open(w.opts.Dir)
+ var syncErr error
+ if e!=nil{syncErr=e}else{syncErr=d.Sync();_ = d.Close()}
  w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
  if e!=nil{return e}
  return syncErr
