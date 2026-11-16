@@ -194,3 +194,18 @@ func TestAppendRequiresEventID(t *testing.T) {
  defer w.Close()
  if _,err=w.Append("",json.RawMessage(`{"v":1}`));err==nil{t.Fatal("expected empty event_id to be rejected")}
 }
+
+
+func TestRecoveryRejectsACKEventIDMismatch(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ r,err:=w.Append("correct-event",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+ f,err:=os.OpenFile(filepath.Join(dir,"ack.wal"),os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
+ raw,err:=json.Marshal(Ack{Seq:r.Seq,Sink:"mqtt",EventID:"wrong-event"});if err!=nil{t.Fatal(err)}
+ if err=writeFrame(f,raw);err!=nil{t.Fatal(err)}
+ if err=f.Sync();err!=nil{t.Fatal(err)}
+ _=f.Close()
+ if _,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096});err==nil{t.Fatal("expected mismatched ACK identity to fail recovery")}
+}
