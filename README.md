@@ -17,7 +17,7 @@ docker compose logs -f collector
 
 See [Docker Compose deployment](docs/DOCKER_COMPOSE.md) for volumes and operations, and [Excel configuration](docs/CONFIGURATION.md) for workbook structure, data types, processing operators, and write safety.
 
-The current collector reads the Excel configuration, polls enabled Modbus TCP devices, batches samples into the local WAL, and replays pending records to MQTT (QoS 1) and InfluxDB v2 with independent durable ACKs. The anonymous Mosquitto configuration is development-only.
+The current collector loads the active validated configuration version from PostgreSQL (bootstrapping it from Excel on first start), polls Modbus TCP devices, batches samples into the local WAL, and replays pending records to MQTT (QoS 1) and InfluxDB v2 with independent durable ACKs. The anonymous Mosquitto configuration is development-only.
 
 ## Local development
 
