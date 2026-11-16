@@ -12,6 +12,7 @@ import (
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/config"
 	"github.com/likongshun/chat/internal/pipeline"
+	"github.com/likongshun/chat/internal/observability"
 	"github.com/likongshun/chat/internal/reliability/wal"
 )
 
@@ -38,16 +39,28 @@ func main() {
 		Config: cfg,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
+	collectorMetrics := &collector.Metrics{}
+	deliveryMetrics := &pipeline.DeliveryMetrics{}
 	engine := &collector.Engine{
 		Scheduler: collector.Scheduler{
 			Workers: envInt("POLL_WORKERS", 500),
 			OutputBuffer: envInt("SCHEDULER_OUTPUT_BUFFER", 10000),
+			Metrics: collectorMetrics,
 		},
 		Poller: poller,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	observabilityDone := make(chan error, 1)
+	observabilityServer := &observability.Server{
+		Addr: envString("METRICS_ADDR", ":9090"),
+		Collector: collectorMetrics,
+		WAL: store,
+		Delivery: deliveryMetrics,
+	}
+	go func() { observabilityDone <- observabilityServer.Run(ctx) }()
 
 	mqttSink, err := pipeline.NewMQTTSink(pipeline.MQTTOptions{
 		Broker: envString("MQTT_BROKER", "tcp://mqtt:1883"),
@@ -79,6 +92,7 @@ func main() {
 			BatchSize: envInt("DELIVERY_BATCH_SIZE", 500),
 			PollInterval: envDuration("DELIVERY_POLL_INTERVAL", time.Second),
 			RetryInterval: envDuration("DELIVERY_RETRY_INTERVAL", time.Second),
+			Metrics: deliveryMetrics,
 			OnError: func(err error) { log.Printf("delivery retry: %v", err) },
 		}
 		go func() { deliveryDone <- worker.Run(ctx) }()
@@ -94,6 +108,9 @@ func main() {
 		stop()
 	}
 	stop()
+	if err := <-observabilityDone; err != nil {
+		log.Printf("observability server: %v", err)
+	}
 	if deliveryDone != nil {
 		if err := <-deliveryDone; err != nil {
 			log.Printf("delivery worker stopped: %v", err)
