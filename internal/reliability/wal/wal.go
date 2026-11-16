@@ -45,7 +45,7 @@ func (w *WAL) recover()error{
  for seg:=w.manifest.FirstSegment;seg<=w.manifest.ActiveSegment;seg++{
   p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
   if _,e:=os.Stat(p);e!=nil{return fmt.Errorf("required data segment %d is unavailable: %w",seg,e)}
-  e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
+  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});e!=nil{return e}
   if seg==^uint64(0){break}
  }
  if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
@@ -80,7 +80,7 @@ func (w *WAL) rotate()error{
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
 func (w *WAL) Ack(a Ack)error{
  w.mu.Lock();defer w.mu.Unlock()
- if w.closed{return os.ErrClosed}
+ if w.closed||w.ack==nil{return os.ErrClosed}
  if a.Sink!="mqtt"&&a.Sink!="influx"{return fmt.Errorf("unsupported sink %q",a.Sink)}
  if a.Seq==0||a.EventID==""{return fmt.Errorf("ACK sequence and event_id are required")}
  found:=false
@@ -125,7 +125,7 @@ func (w *WAL) Pending()([]Record,error){
  w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return nil,e}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return nil,e};sort.Strings(files);var out []Record
  for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
-  e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)!=nil||r.Seq<=w.manifest.CheckpointSeq{return nil};if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{out=append(out,r)};return nil});if e!=nil{return nil,e}
+  e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e};if r.Seq<=w.manifest.CheckpointSeq{return nil};if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{out=append(out,r)};return nil});if e!=nil{return nil,e}
  };return out,nil
 }
 func (w *WAL) Checkpoint(seq uint64)error{
