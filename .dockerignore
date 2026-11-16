@@ -1,0 +1,7 @@
+.git
+.github
+data
+*.log
+.env
+.env.*
+!*.env.example
