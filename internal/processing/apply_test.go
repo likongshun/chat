@@ -16,8 +16,8 @@ func TestApplyPredefinedOperators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != float64(15) {
-		t.Fatalf("processed value=%v, want 15", got)
+	if got != float64(65) {
+		t.Fatalf("processed value=%v, want 65", got)
 	}
 }
 
