@@ -114,10 +114,11 @@ func influxLine(event Event) (string, error) {
 	if sample.DeviceID == "" || sample.PointCode == "" || sample.Timestamp.IsZero() {
 		return "", fmt.Errorf("event %d is missing device_id, point_code or timestamp", event.Seq)
 	}
-	tags := []string{"device_id=" + escapeTag(sample.DeviceID), "point_code=" + escapeTag(sample.PointCode)}
+	tags := []string{"device_id=" + escapeTag(sample.DeviceID)}
 	if sample.Model != "" {
 		tags = append(tags, "model="+escapeTag(sample.Model))
 	}
+	tags = append(tags, "point_code="+escapeTag(sample.PointCode))
 	if sample.Quality != "" {
 		tags = append(tags, "quality="+escapeTag(sample.Quality))
 	}
