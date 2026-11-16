@@ -4,6 +4,7 @@ import (
  "encoding/json"
  "errors"
  "fmt"
+ "io"
  "os"
  "path/filepath"
  "sort"
@@ -72,7 +73,7 @@ func (w *WAL) Ack(a Ack)error{
   if !errors.Is(e,syscall.ENOSPC){return e}
   if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
   if e=repairFrameTail(ackPath);e!=nil{return e}
-  if _,e=w.ack.Seek(0,os.SEEK_END);e!=nil{return e}
+  if _,e=w.ack.Seek(0,io.SeekEnd);e!=nil{return e}
   if e=writeFrame(w.ack,b);e!=nil{return e}
  }
  if e=w.ack.Sync();e!=nil{
