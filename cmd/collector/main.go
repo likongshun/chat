@@ -48,6 +48,43 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	mqttSink, err := pipeline.NewMQTTSink(pipeline.MQTTOptions{
+		Broker: envString("MQTT_BROKER", "tcp://mqtt:1883"),
+		ClientID: envString("MQTT_CLIENT_ID", "modbus-collector"),
+		Username: os.Getenv("MQTT_USERNAME"),
+		Password: os.Getenv("MQTT_PASSWORD"),
+		Topic: envString("MQTT_TOPIC", "modbus/telemetry"),
+		Timeout: envDuration("SINK_TIMEOUT", 10*time.Second),
+	})
+	if err != nil {
+		log.Fatalf("configure MQTT sink: %v", err)
+	}
+	influxSink, err := pipeline.NewInfluxSink(pipeline.InfluxOptions{
+		URL: envString("INFLUXDB_URL", "http://influxdb:8086"),
+		Org: envString("INFLUXDB_ORG", "modbus"),
+		Bucket: envString("INFLUXDB_BUCKET", "telemetry"),
+		Token: os.Getenv("INFLUXDB_TOKEN"),
+		Timeout: envDuration("SINK_TIMEOUT", 10*time.Second),
+	})
+	if err != nil {
+		log.Printf("InfluxDB sink disabled: %v; records will remain in WAL", err)
+	}
+	var deliveryDone chan error
+	if influxSink != nil {
+		deliveryDone = make(chan error, 1)
+		worker := &pipeline.DeliveryWorker{
+			Store: store,
+			Sinks: []pipeline.Sink{mqttSink, influxSink},
+			BatchSize: envInt("DELIVERY_BATCH_SIZE", 500),
+			PollInterval: envDuration("DELIVERY_POLL_INTERVAL", time.Second),
+			RetryInterval: envDuration("DELIVERY_RETRY_INTERVAL", time.Second),
+			OnError: func(err error) { log.Printf("delivery retry: %v", err) },
+		}
+		go func() { deliveryDone <- worker.Run(ctx) }()
+	} else {
+		log.Printf("downstream delivery is not configured; WAL will buffer samples")
+	}
 	results := engine.Run(ctx, cfg.Devices)
 	log.Printf("collector started: devices=%d points=%d WAL=%s workers=%d",
 		len(cfg.Devices), len(cfg.Points), dir, envInt("POLL_WORKERS", 500))
@@ -56,6 +93,13 @@ func main() {
 		log.Printf("persist collection result: %v; stopping collection", err)
 		stop()
 	}
+	stop()
+	if deliveryDone != nil {
+		if err := <-deliveryDone; err != nil {
+			log.Printf("delivery worker stopped: %v", err)
+		}
+	}
+	mqttSink.Close()
 	if err := engine.Close(); err != nil {
 		log.Printf("close Modbus clients: %v", err)
 	}
