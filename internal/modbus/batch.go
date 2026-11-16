@@ -15,6 +15,7 @@ type PointSpan struct {
 }
 
 type ReadBatch struct {
+	Model     string
 	Function  byte
 	ReadGroup string
 	Start     uint16
@@ -23,6 +24,7 @@ type ReadBatch struct {
 }
 
 type readPoint struct {
+	model string
 	function byte
 	group string
 	address uint16
@@ -44,10 +46,11 @@ func BuildReadBatches(points []config.Point, maxGap uint16) ([]ReadBatch, error)
 		if uint32(p.Address)+uint32(p.Count) > 65536 {
 			return nil, fmt.Errorf("point %s: address range exceeds Modbus address space", p.PointCode)
 		}
-		items = append(items, readPoint{p.Function, p.ReadGroup, p.Address, p.Count, p.PointCode})
+		items = append(items, readPoint{p.Model, p.Function, p.ReadGroup, p.Address, p.Count, p.PointCode})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		a, b := items[i], items[j]
+		if a.model != b.model { return a.model < b.model }
 		if a.function != b.function { return a.function < b.function }
 		if a.group != b.group { return a.group < b.group }
 		if a.address != b.address { return a.address < b.address }
@@ -66,7 +69,7 @@ func BuildReadBatches(points []config.Point, maxGap uint16) ([]ReadBatch, error)
 		end := uint32(last.Start) + uint32(last.Count)
 		nextEnd := uint32(p.address) + uint32(p.count)
 		gapEnd := end + uint32(maxGap)
-		merge := last.Function == p.function && last.ReadGroup == p.group &&
+		merge := last.model == p.model && last.Function == p.function && last.ReadGroup == p.group &&
 			uint32(p.address) <= gapEnd && max(end, nextEnd)-uint32(last.Start) <= limit
 		if !merge {
 			batches = append(batches, newBatch(p))
@@ -84,7 +87,7 @@ func BuildReadBatches(points []config.Point, maxGap uint16) ([]ReadBatch, error)
 
 func newBatch(p readPoint) ReadBatch {
 	return ReadBatch{
-		Function:p.function, ReadGroup:p.group, Start:p.address, Count:p.count,
+		Model:p.model, Function:p.function, ReadGroup:p.group, Start:p.address, Count:p.count,
 		Spans:[]PointSpan{{PointCode:p.code, Address:p.address, Count:p.count, Offset:0}},
 	}
 }
