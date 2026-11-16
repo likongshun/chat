@@ -1,12 +1,28 @@
 # Modbus Collection Engine
 
-Go-based high-concurrency Modbus TCP collection engine with a durable WAL pipeline.
+Go-based Modbus TCP collection engine with Excel-driven device configuration and a durable WAL foundation.
 
-> Initial engineering scaffold. See docs/IMPLEMENTATION_STATUS.md for implemented scope and verification status.
+> The repository is under active staged development. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for implemented scope and verification status.
 
-## Quick start
+## Docker Compose
 
-```bash
+Copy `.env.example` to `.env`, replace all `CHANGE_ME` secrets, then run:
+
+```sh
+cp .env.example .env
+docker compose config
+docker compose up -d --build
+docker compose ps
+```
+
+See [Docker Compose deployment](docs/DOCKER_COMPOSE.md) for volumes, operations, and production hardening.
+
+**Current limitation:** Compose provisions PostgreSQL, Mosquitto, and InfluxDB, but the current collector process only loads the Excel configuration and opens the WAL. The live Modbus polling and MQTT/InfluxDB delivery path is not yet integrated. The bundled anonymous MQTT configuration is development-only.
+
+## Local development
+
+```sh
+go mod tidy
 go test ./...
 go run ./cmd/collector
 ```
