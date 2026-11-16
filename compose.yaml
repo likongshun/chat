@@ -27,6 +27,13 @@ services:
       INFLUXDB_ORG: ${INFLUXDB_ORG:-modbus}
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-telemetry}
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-${INFLUXDB_ADMIN_TOKEN}}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-modbus}
+      POSTGRES_USER: ${POSTGRES_USER:-modbus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+      CONFIG_IMPORT_ON_START: ${CONFIG_IMPORT_ON_START:-false}
       SINK_TIMEOUT: ${SINK_TIMEOUT:-10s}
       DELIVERY_BATCH_SIZE: ${DELIVERY_BATCH_SIZE:-500}
       DELIVERY_POLL_INTERVAL: ${DELIVERY_POLL_INTERVAL:-1s}
@@ -48,6 +55,8 @@ services:
     cap_drop:
       - ALL
     depends_on:
+      postgres:
+        condition: service_healthy
       mqtt:
         condition: service_started
       influxdb:
