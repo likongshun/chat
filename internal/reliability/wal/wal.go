@@ -161,8 +161,39 @@ func (w *WAL) Checkpoint(seq uint64)error{
  old:=w.manifest.CheckpointSeq
  w.manifest.CheckpointSeq=seq
  if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;return e}
+ if e=w.compactAckLog(seq);e!=nil{return fmt.Errorf("checkpoint %d committed but ACK compaction failed: %w",seq,e)}
  return nil
 }
+
+func (w *WAL) compactAckLog(boundary uint64)error{
+ ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
+ tmpPath:=ackPath+".tmp"
+ tmp,e:=os.OpenFile(tmpPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e}
+ keepErr:=readFrames(ackPath,func(b []byte)error{
+  var a Ack
+  if e:=json.Unmarshal(b,&a);e!=nil{return e}
+  if a.Seq>boundary{return writeFrame(tmp,b)}
+  return nil
+ })
+ if keepErr!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return keepErr}
+ if e=tmp.Sync();e!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return e}
+ if e=tmp.Close();e!=nil{_ = os.Remove(tmpPath);return e}
+ if w.ack!=nil{
+  if e=w.ack.Sync();e!=nil{_ = os.Remove(tmpPath);return e}
+  if e=w.ack.Close();e!=nil{_ = os.Remove(tmpPath);return e}
+  w.ack=nil
+ }
+ if e=os.Rename(tmpPath,ackPath);e!=nil{
+  w.ack,_=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
+  return e
+ }
+ d,e:=os.Open(w.opts.Dir);if e!=nil{return e}
+ syncErr:=d.Sync();_ = d.Close()
+ w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
+ if e!=nil{return e}
+ return syncErr
+}
+
 func checkpointPath(dir string,seq uint64)string{return filepath.Join(dir,fmt.Sprintf("checkpoint-%020d.json",seq))}
 
 // cleanupObsoleteSegments resumes deletion after a crash that occurred after
