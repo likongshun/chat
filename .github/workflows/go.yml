@@ -34,9 +34,9 @@ jobs:
           docker compose config --quiet
       - name: Build collector container image
         run: docker build --tag modbus-collector:ci .
-      - name: Start MQTT and InfluxDB integration services
+      - name: Start PostgreSQL, MQTT and InfluxDB integration services
         run: docker compose up -d --wait postgres mqtt influxdb
-      - name: Test MQTT QoS 1 and InfluxDB v2 delivery
+      - name: Test PostgreSQL configuration, MQTT QoS 1 and InfluxDB v2
         run: |
           INFLUX_TEST_TOKEN="$(sed -n 's/^INFLUXDB_ADMIN_TOKEN=//p' .env)" \
           POSTGRES_TEST_DSN="postgres://modbus:$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)@127.0.0.1:5432/modbus?sslmode=disable" \
