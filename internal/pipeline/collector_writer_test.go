@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestPersistResultsWritesSamplesToWAL(t *testing.T) {
 	}
 	close(results)
 
-	if err := PersistResults(results, store); err != nil {
+	if err := PersistResults(context.Background(), results, store); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := store.Pending()
