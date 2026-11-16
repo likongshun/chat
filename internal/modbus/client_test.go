@@ -1,6 +1,9 @@
 package modbus
 
-import (\n\t"github.com/likongshun/chat/internal/config"
+import (
+	"context"
+	"encoding/binary"
+	"github.com/likongshun/chat/internal/config"
 	"context"
 	"encoding/binary"
 	"io"
