@@ -42,9 +42,7 @@ func DecodeRegisters(point config.Point, registers []uint16) (any, error) {
 		}
 	case "INT64", "UINT64", "FLOAT64":
 		if len(raw)!=8 { return nil, fmt.Errorf("%s requires four registers", point.DataType) }
-		b := make([]byte,8)
-		copy(b,raw)
-		for i:=0;i<4;i++ { word := strings.ToUpper(point.ByteOrder); _ = word }
+		b := apply64Order(raw, point.ByteOrder)
 		if strings.EqualFold(point.WordOrder,"LOW_HIGH") { reverseWords(b) }
 		v := binary.BigEndian.Uint64(b)
 		switch strings.ToUpper(point.DataType) {
@@ -85,4 +83,12 @@ func apply32Order(in []byte, order string) []byte {
 func swapWords(b []byte) { for i:=0;i+3<len(b);i+=4 { b[i],b[i+1],b[i+2],b[i+3]=b[i+2],b[i+3],b[i],b[i+1] } }
 func reverseWords(b []byte) {
 	for i,j:=0,len(b)-2;i<j;i,j=i+2,j-2 { b[i],b[i+1],b[j],b[j+1]=b[j],b[j+1],b[i],b[i+1] }
+}
+
+func apply64Order(in []byte, order string) []byte {
+	out := append([]byte(nil), in...)
+	for i := 0; i < len(out); i += 4 {
+		copy(out[i:i+4], apply32Order(out[i:i+4], order))
+	}
+	return out
 }
