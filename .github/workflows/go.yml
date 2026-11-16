@@ -28,3 +28,9 @@ jobs:
         run: go test ./...
       - name: Race tests
         run: go test -race ./internal/config ./internal/modbus ./internal/collector ./internal/reliability/...
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Build collector container image
+        run: docker build --tag modbus-collector:ci .
