@@ -48,7 +48,25 @@ func (w *WAL) rotate()error{
  if e:=w.data.Sync();e!=nil{return e};if e:=w.data.Close();e!=nil{return e};w.manifest.ActiveSegment++;if e:=w.saveManifest();e!=nil{return e};return w.openDataOnly()
 }
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
-func (w *WAL) Ack(a Ack)error{w.mu.Lock();defer w.mu.Unlock();if w.closed{return os.ErrClosed};if a.Sink!="mqtt"&&a.Sink!="influx"{return fmt.Errorf("unsupported sink %q",a.Sink)};b,e:=json.Marshal(a);if e!=nil{return e};if e=writeFrame(w.ack,b);e!=nil{return e};return w.ack.Sync()}
+func (w *WAL) Ack(a Ack)error{
+ w.mu.Lock();defer w.mu.Unlock()
+ if w.closed{return os.ErrClosed}
+ if a.Sink!="mqtt"&&a.Sink!="influx"{return fmt.Errorf("unsupported sink %q",a.Sink)}
+ if a.Seq==0||a.EventID==""{return fmt.Errorf("ACK sequence and event_id are required")}
+ found:=false
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files)
+ for _,p:=range files{
+  var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
+  if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e};if r.Seq==a.Seq{if r.EventID!=a.EventID{return fmt.Errorf("ACK event_id mismatch for seq %d",a.Seq)};found=true};return nil})
+  if e!=nil{return e};if found{break}
+ }
+ if !found{return fmt.Errorf("ACK references unknown or checkpointed seq %d",a.Seq)}
+ // An ACK is considered committed only after the log sync succeeds.
+ b,e:=json.Marshal(a);if e!=nil{return e}
+ if e=writeFrame(w.ack,b);e!=nil{return e}
+ return w.ack.Sync()
+}
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{};e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if json.Unmarshal(b,&a)==nil{if acked[a.Sink]==nil{acked[a.Sink]=map[uint64]bool{}};acked[a.Sink][a.Seq]=true};return nil});return acked,e
 }
