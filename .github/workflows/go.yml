@@ -35,15 +35,16 @@ jobs:
       - name: Build collector container image
         run: docker build --tag modbus-collector:ci .
       - name: Start MQTT and InfluxDB integration services
-        run: docker compose up -d --wait mqtt influxdb
+        run: docker compose up -d --wait postgres mqtt influxdb
       - name: Test MQTT QoS 1 and InfluxDB v2 delivery
         run: |
           INFLUX_TEST_TOKEN="$(sed -n 's/^INFLUXDB_ADMIN_TOKEN=//p' .env)" \
+          POSTGRES_TEST_DSN="postgres://modbus:$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)@127.0.0.1:5432/modbus?sslmode=disable" \
           MQTT_TEST_BROKER=tcp://127.0.0.1:1883 \
           INFLUX_TEST_URL=http://127.0.0.1:8086 \
           INFLUX_TEST_ORG=modbus \
           INFLUX_TEST_BUCKET=telemetry \
-          go test ./internal/pipeline -run 'TestMQTTSinkQoS1Integration|TestInfluxSinkIntegration' -count=1
+          go test ./internal/pipeline ./internal/configstore -run 'TestMQTTSinkQoS1Integration|TestInfluxSinkIntegration|TestPostgresConfigVersionImportAndActivate' -count=1
       - name: Stop integration services
         if: always()
         run: |
