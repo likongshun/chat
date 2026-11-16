@@ -57,8 +57,8 @@ func (w *WAL) Pending()([]Record,error){
  };return out,nil
 }
 func (w *WAL) Checkpoint(seq uint64)error{
- w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return e}
- files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
+ w.mu.Lock();defer w.mu.Unlock();if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
+ acked,e:=w.ackState();if e!=nil{return e};files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
  for _,p:=range files{e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)};return nil});if e!=nil{return e}}
  cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(cp);if e!=nil{return e};if e=atomicFile(filepath.Join(w.opts.Dir,"checkpoint.json"),b);e!=nil{return e}
  w.manifest.CheckpointSeq=seq;return w.saveManifest()
@@ -68,15 +68,19 @@ func atomicFile(path string,b []byte)error{
  tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=f.Sync();e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return d.Sync()
 }
 func (w *WAL) Reclaim()error{
- w.mu.Lock();defer w.mu.Unlock();files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files)
- var remove []string;newFirst:=w.manifest.FirstSegment
- for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg>=w.manifest.ActiveSegment{continue}
+ w.mu.Lock();defer w.mu.Unlock()
+ // Advance only across a contiguous prefix of checkpointed segments.
+ next:=w.manifest.FirstSegment;var remove []string
+ for seg:=w.manifest.FirstSegment;seg<w.manifest.ActiveSegment;seg++{
+  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg));_,e:=os.Stat(p)
+  if os.IsNotExist(e){next=seg+1;continue};if e!=nil{return e}
   safe:=true;e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq>w.manifest.CheckpointSeq{safe=false};return nil});if e!=nil{return e}
-  if safe{remove=append(remove,p);if seg>=newFirst{newFirst=seg+1}}
+  if !safe{break};remove=append(remove,p);next=seg+1
  }
- if len(remove)==0{return nil};old:=w.manifest.FirstSegment;w.manifest.FirstSegment=newFirst
- if e=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
- for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
+ if next==w.manifest.FirstSegment{return nil}
+ old:=w.manifest.FirstSegment;w.manifest.FirstSegment=next
+ if e:=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
+ for _,p:=range remove{if e:=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
  d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
 }
 func (w *WAL) Close()error{

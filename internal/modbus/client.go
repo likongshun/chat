@@ -21,9 +21,12 @@ func (c *Client) request(ctx context.Context,unit,fn byte,payload []byte)([]byte
  if _,e=conn.Write(mbap);e!=nil{return nil,e}
  var h [7]byte;if _,e=io.ReadFull(conn,h[:]);e!=nil{return nil,e}
  n:=binary.BigEndian.Uint16(h[4:6]);if n<2||n>254{return nil,fmt.Errorf("invalid MBAP length %d",n)}
+ if binary.BigEndian.Uint16(h[2:4])!=0||h[6]!=unit{return nil,errors.New("protocol or unit id mismatch")}
  body:=make([]byte,n-1);if _,e=io.ReadFull(conn,body);e!=nil{return nil,e}
  if binary.BigEndian.Uint16(h[:2])!=id{return nil,errors.New("transaction id mismatch")}
- if body[0]==fn|0x80{return nil,fmt.Errorf("%w: code %d",ErrException,body[1])};if body[0]!=fn{return nil,errors.New("function mismatch")}
+ if len(body)<1{return nil,errors.New("empty PDU")}
+ if body[0]==fn|0x80{if len(body)<2{return nil,errors.New("truncated exception response")};return nil,fmt.Errorf("%w: code %d",ErrException,body[1])}
+ if body[0]!=fn{return nil,errors.New("function mismatch")}
  return body[1:],nil
 }
 func (c *Client) ReadHolding(ctx context.Context,unit byte,address,count uint16)([]uint16,error){return c.read(ctx,unit,3,address,count)}
