@@ -1,6 +1,7 @@
 package modbus
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -69,7 +70,7 @@ func BuildReadBatches(points []config.Point, maxGap uint16) ([]ReadBatch, error)
 		end := uint32(last.Start) + uint32(last.Count)
 		nextEnd := uint32(p.address) + uint32(p.count)
 		gapEnd := end + uint32(maxGap)
-		merge := last.model == p.model && last.Function == p.function && last.ReadGroup == p.group &&
+		merge := last.Model == p.model && last.Function == p.function && last.ReadGroup == p.group &&
 			uint32(p.address) <= gapEnd && max(end, nextEnd)-uint32(last.Start) <= limit
 		if !merge {
 			batches = append(batches, newBatch(p))
