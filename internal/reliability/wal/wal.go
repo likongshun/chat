@@ -16,6 +16,7 @@ func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
  w:=&WAL{opts:o,lock:l,next:1};fail:=func(e error)(*WAL,error){l.close();return nil,e}
+ if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil{return fail(err)}
  if err=w.loadManifest();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
 }
 func (w *WAL) loadManifest()error{
@@ -36,7 +37,7 @@ func (w *WAL) openActive()error{
  w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{f.Close();return e}
  if e=repairFrameTail(ackPath);e!=nil{f.Close();w.ack.Close();return e};return nil
 }
-func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir(){total+=i.Size()};return nil});return total,e}
+func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir()&&i.Name()!="ack.reserve"{total+=i.Size()};return nil});return total,e}
 func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
  w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed}
  usage,e:=w.diskUsage();if e!=nil{return Record{},e};if usage+int64(len(payload))+256>w.opts.MaxBytes-w.opts.ReserveBytes{return Record{},ErrCapacity}
