@@ -53,3 +53,28 @@ func TestManagerReloadFailureKeepsLastGoodSnapshot(t *testing.T) {
 		t.Fatal("Current returned mutable internal snapshot")
 	}
 }
+
+
+func TestValidateProcessingParameters(t *testing.T) {
+	base := Config{
+		Points: []Point{{Model: "M", PointCode: "p", Function: 3, Count: 1, DataType: "UINT16", Scale: 1}},
+	}
+	cases := []struct {
+		name string
+		rule Processing
+	}{
+		{name: "bit out of range", rule: Processing{PointCode: "p", Operation: "BIT", Param1: 64}},
+		{name: "fractional round precision", rule: Processing{PointCode: "p", Operation: "ROUND", Param1: 1.5}},
+		{name: "invalid clamp range", rule: Processing{PointCode: "p", Operation: "CLAMP", Param1: 10, Param2: 1}},
+		{name: "zero divide", rule: Processing{PointCode: "p", Operation: "DIVIDE", Param1: 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := base
+			c.Processing = []Processing{tc.rule}
+			if err := c.Validate(); err == nil {
+				t.Fatal("expected invalid processing parameters to be rejected")
+			}
+		})
+	}
+}
