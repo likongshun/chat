@@ -359,6 +359,25 @@ func (w *WAL) Reclaim()error{
  for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
  d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
 }
+// Stats returns an operational snapshot for health and Prometheus exporters.
+func (w *WAL) Stats()(Stats,error){
+ pending,e:=w.PendingWithAcks();if e!=nil{return Stats{},e}
+ usage,e:=w.diskUsage();if e!=nil{return Stats{},e}
+ ids,e:=listSegmentIDs(w.opts.Dir,"data");if e!=nil{return Stats{},e}
+ w.mu.Lock()
+ stats:=Stats{
+  DiskBytes:usage,MaxBytes:w.opts.MaxBytes,
+  PendingRecords:len(pending),SegmentCount:len(ids),
+  CheckpointSeq:w.manifest.CheckpointSeq,
+  FirstSegment:w.manifest.FirstSegment,ActiveSegment:w.manifest.ActiveSegment,
+ }
+ w.mu.Unlock()
+ if stats.MaxBytes>0{stats.DiskUsedRatio=float64(stats.DiskBytes)/float64(stats.MaxBytes)}
+ now:=time.Now()
+ for _,record:=range pending{age:=now.Sub(record.CreatedAt);if age>stats.OldestPendingAge{stats.OldestPendingAge=age}}
+ return stats,nil
+}
+
 func (w *WAL) Close()error{
  w.mu.Lock();defer w.mu.Unlock();if w.closed{return nil};w.closed=true;var es []string
  if w.data!=nil{if e:=w.data.Sync();e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
