@@ -18,10 +18,16 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
-      - name: Resolve and record module checksums
+      - name: Resolve module dependencies
         run: go mod tidy
-      - name: Format Go sources
-        run: gofmt -w .
+      - name: Check Go formatting
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "The following Go files need gofmt:"
+            echo "$files"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Unit tests
