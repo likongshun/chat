@@ -29,6 +29,8 @@ type Stats struct {
  MaxBytes int64
  DiskUsedRatio float64
  PendingRecords int
+ CapacityRejections uint64
+ AdmissionLimitBytes int64
  OldestPendingAge time.Duration
  SegmentCount int
  CheckpointSeq uint64
