@@ -85,11 +85,12 @@ func (s Scheduler) runDevice(ctx context.Context, limit chan struct{}, out chan<
 			timer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
-				if !timer.Stop() { <-timer.C }
+				if !timer.Stop() { select { case <-timer.C: default: } }
 				return
 			case <-timer.C:
 			}
 		}
+		if ctx.Err() != nil { return }
 		select {
 		case limit <- struct{}{}:
 		case <-ctx.Done():
@@ -155,7 +156,8 @@ func (s Scheduler) Poll(ctx context.Context, devices []config.Device, fn func(co
 			for d := range jobs {
 				started := time.Now()
 				callCtx, cancel := context.WithTimeout(ctx, s.Timeout)
-				err := fn(callCtx, d)
+				var err error
+				if fn == nil { err = errors.New("nil poll function") } else { err = fn(callCtx, d) }
 				cancel()
 				out <- Result{DeviceID:d.ID, At:time.Now(), StartedAt:started, Duration:time.Since(started), Err:err}
 			}
