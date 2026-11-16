@@ -178,3 +178,22 @@ func TestCheckpointCompactsOnlyACKsAtOrBelowBoundary(t *testing.T) {
  if len(pending)!=1||pending[0].Seq!=second.Seq{t.Fatalf("pending=%v, want second record only",pending)}
  if err=w.Close();err!=nil{t.Fatal(err)}
 }
+
+
+func TestPendingWithAcksReportsIndependentSinkState(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ r,err:=w.Append("evt-partial",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ if err=w.Ack(Ack{Seq:r.Seq,Sink:"mqtt",EventID:r.EventID});err!=nil{t.Fatal(err)}
+ pending,err:=w.PendingWithAcks();if err!=nil{t.Fatal(err)}
+ if len(pending)!=1{t.Fatalf("pending count=%d, want 1",len(pending))}
+ if !pending[0].MQTTAcked||pending[0].InfluxAcked{t.Fatalf("unexpected ACK state: %+v",pending[0])}
+}
+func TestAppendRequiresEventID(t *testing.T) {
+ w,err:=Open(Options{Dir:t.TempDir(),MaxBytes:1<<20,ReserveBytes:4096})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ if _,err=w.Append("",json.RawMessage(`{"v":1}`));err==nil{t.Fatal("expected empty event_id to be rejected")}
+}
