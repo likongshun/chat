@@ -158,3 +158,21 @@ func TestOpenRepairsTornActiveDataAndACKTailsBeforeRecovery(t *testing.T) {
  pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
  if len(pending)!=1||pending[0].Seq!=r.Seq{t.Fatalf("pending after recovery=%v, want original record",pending)}
 }
+
+
+func TestCheckpointCompactsOnlyACKsAtOrBelowBoundary(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ first,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ second,err:=w.Append("evt-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:first.Seq,Sink:sink,EventID:first.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Ack(Ack{Seq:second.Seq,Sink:"mqtt",EventID:second.EventID});err!=nil{t.Fatal(err)}
+ if err=w.Checkpoint(first.Seq);err!=nil{t.Fatal(err)}
+ count:=0
+ if err=readFrames(filepath.Join(dir,"ack.wal"),func(b []byte)error{var a Ack;if err:=json.Unmarshal(b,&a);err!=nil{return err};if a.Seq<=first.Seq{t.Fatalf("checkpointed ACK seq %d was not compacted",a.Seq)};count++;return nil});err!=nil{t.Fatal(err)}
+ if count!=1{t.Fatalf("retained ACK count=%d, want 1",count)}
+ pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
+ if len(pending)!=1||pending[0].Seq!=second.Seq{t.Fatalf("pending=%v, want second record only",pending)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+}
