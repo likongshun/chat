@@ -4,66 +4,74 @@ Repository: `https://github.com/likongshun/chat`
 
 ## Implemented source scope
 
-### Stage 1 — configuration
-- Five-sheet Excel loader: Devices, Points, Processing, WriteRules, Enums.
-- Header-name based column resolution.
-- Validation of IDs, model references, function codes, data types, register ranges, numeric values, and disabled write policy.
+### Stage 1 — Excel configuration
+- Five-sheet loader: Devices, Points, Processing, WriteRules, Enums.
+- Header-name based column resolution and validation of IDs, model references, function codes, data types, register ranges, numeric values, and disabled write policy.
 - Atomic reload retaining the last known-good configuration snapshot.
 
 ### Stage 2 — Modbus TCP
-- Persistent TCP connection per client, serialized requests, automatic reconnect after transport/protocol errors.
-- Modbus TCP MBAP transaction/protocol/unit validation.
-- Read functions FC01, FC02, FC03 and FC04.
-- Protocol limits enforced: 2,000 bits and 125 registers per request.
-- Read-batch planner coalesces adjacent/overlapping points without crossing function, model, or read-group boundaries.
-- Register decoding for signed/unsigned integers, FLOAT32/FLOAT64, and STRING; bit decoding for BOOL.
-- No Modbus write API is exposed by the current client.
+- Persistent TCP connection per client, serialized requests, reconnect after transport/protocol errors.
+- MBAP transaction/protocol/unit validation.
+- Read functions FC01, FC02, FC03, FC04 with protocol limits of 2,000 bits and 125 registers.
+- Read batching by function/model/read group, with address-span mapping.
+- Decoding for signed/unsigned integers, FLOAT32/FLOAT64, STRING and BOOL.
+- No Modbus write API is exposed.
 
 ### Stage 3 — collection scheduler
-- One long-running serialized loop per enabled device.
-- Global in-flight request/poll cap (default 500).
-- Per-device poll interval, configurable timeout, initial stagger, exponential reconnect backoff with jitter.
-- Bounded result channel; backpressure is explicit and results are not silently dropped.
-- Atomic poll/error/timeout/sample/in-flight/duration metrics.
-- Modbus point poller maps batch responses back to configured point samples and preserves point-level quality/errors.
-- Graceful cancellation and client close support.
+- One serialized polling loop per enabled device and global in-flight cap (default 500).
+- Per-device intervals, configurable timeout, initial stagger, exponential backoff with jitter.
+- Bounded output channel with explicit backpressure.
+- Poll/error/timeout/sample/in-flight/duration metrics and graceful shutdown.
+- Point-level quality/error mapping.
 
-### Stage 4 — durability (incomplete)
-- Frame writes handle short writes; frame readers reject invalid lengths/checksums; active data/ACK logs repair incomplete physical tails before append.
-- A reusable segmented log writer with deterministic segment naming, rotation, reopen, and directory sync is present with unit coverage; it is not yet wired into the main WAL/manifest lifecycle.
-- ACK validation checks the referenced sequence and exact event ID before persisting the ACK.
-- Linux opens preallocate a dedicated `ack.reserve` file with `fallocate`; ACK write/sync ENOSPC paths attempt to release the reserve and retry.
-- The current WAL still uses the legacy data/ACK layout and old checkpoint/reclaim implementation.
-- The approved segmented Data WAL + segmented ACK WAL + checkpoint snapshot + manifest commit/recovery/reclaim protocol, reserve replenishment, capacity watermarks, unified fsync metrics, and disk-full/process-kill fault tests are not complete.
-- Do not use the current WAL implementation as a production durability guarantee.
+### Stage 4 — WAL durability (implemented foundation; not production complete)
+- Exclusive Linux process lock held for WAL lifetime.
+- Framed Data WAL with CRC32, short-write handling, strict frame validation and active-tail repair before recovery.
+- Segmented Data WAL rotation with manifest-managed active/first segment boundaries.
+- Independent MQTT and Influx ACK records, strict sink/sequence/event-ID validation, and recovery-time ACK-to-data identity checks.
+- `PendingWithAcks()` returns independent per-sink ACK state for replay decisions.
+- Immutable sequence-specific checkpoint generations. Checkpoint advances only across a fully ACKed sequence prefix; MANIFEST is the commit point.
+- ACK log compaction occurs only after the checkpoint MANIFEST commit and preserves ACKs above the checkpoint boundary.
+- Reclaim advances MANIFEST before deleting only fully checkpoint-covered, non-active segments. Recovery cleans obsolete leftovers after a partial deletion and fails closed if a required segment is missing.
+- Sequence numbering resumes from the committed checkpoint and retained records, preventing reuse after reclaim.
+- Linux ACK reserve preallocation via `fallocate`; ACK write/sync ENOSPC paths release reserve and retry. Startup can still recover when reserve allocation encounters ENOSPC.
 
-### Stage 4 — downstream pipeline (not integrated)
-- A minimal Sink/Dispatcher interface exists.
-- MQTT QoS 1 and InfluxDB adapters, independent durable ACK handling, and end-to-end replay are not implemented.
-- The current collector command loads Excel configuration and opens WAL, then waits for shutdown; it does not yet start the full polling and delivery pipeline.
+Remaining WAL gaps:
+- ACK WAL is still a single file, not segmented.
+- Checkpoint currently represents a fully acknowledged prefix; it is not a full pending-record snapshot with per-sink state.
+- Manifest/checkpoint checksum and explicit checkpoint reference fields are not implemented.
+- Automatic ACK reserve replenishment, filesystem-wide warning/critical/stop watermarks, and capacity health metrics are not implemented.
+- Unified fsync metrics and process-kill/disk-full fault injection are not complete.
+- No production durability guarantee should be claimed until these gaps and target-filesystem fault tests are closed.
+
+### Stage 4 — downstream delivery (not integrated)
+- A basic Sink/Dispatcher interface exists.
+- MQTT QoS 1 and InfluxDB adapters, live WAL replay loop, and end-to-end delivery are not yet integrated.
+- Current collector command loads Excel configuration and opens WAL, then waits for shutdown; it does not yet run the Modbus polling pipeline.
 
 ### Deployment foundation
 - Multi-stage Dockerfile builds a non-root collector image.
 - Docker Compose provisions collector, PostgreSQL 16, Mosquitto 2, and InfluxDB 2.7 with persistent volumes.
-- Compose is infrastructure scaffolding only: PostgreSQL/MQTT/InfluxDB are not yet wired into the Go application.
-- Mosquitto is configured for anonymous local development only; production authentication, ACLs, and TLS remain required.
+- PostgreSQL/MQTT/InfluxDB are infrastructure services only; they are not yet wired into the Go application.
+- Mosquitto allows anonymous access for local development only. Production requires authentication, ACLs, TLS, and secret management.
 - See `docs/DOCKER_COMPOSE.md`.
 
 ## Verification status
 
-- GitHub Actions run `43957997176` for commit `7e51b40ce0cf3ea7641e905baae9bcc48cea2112` completed successfully: `go mod tidy`, `gofmt -w .`, `go vet ./...`, `go test ./...`, and the configured race-test packages all passed.
-- That successful run predates the Docker/Compose commits. The new Docker build and Compose configuration have not yet been verified by a subsequent CI run or by a live Docker host.
-- No physical Modbus device interoperability test, crash-recovery fault test, disk-full test, or 5,000-device load test has been completed.
+- Commit `31ac68b74368942f8b285b53ebd4ce347ca399e1` passed Go CI, Docker Compose configuration validation, and Docker image build.
+- WAL changes after that commit are undergoing their own Go CI runs; do not infer their result from the earlier successful run.
+- Unit tests now cover lock exclusion, ACK validation, torn active-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, and per-sink pending state. The newest changes still require a successful CI run.
+- No physical Modbus device interoperability test, process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work in sequence
 
-1. Finish segmented Data WAL and ACK WAL, checkpoint snapshot, manifest commit/recovery, crash-safe reclaim, reserve replenishment, capacity watermarks, and unified fsync metrics; add process-kill and disk-full fault tests.
-2. Add MQTT QoS 1 and InfluxDB adapters with independent durable ACKs and idempotent event identity.
-3. Connect the scheduler output to WAL and the durable downstream pipeline; add bounded backpressure and shutdown/replay behavior.
+1. Finish WAL format checksums/migration, segmented ACK WAL, reserve replenishment, capacity watermarks, unified fsync instrumentation, and process-kill/disk-full tests.
+2. Implement MQTT QoS 1 and InfluxDB adapters with independent durable ACKs and idempotent event identity.
+3. Connect scheduler output to WAL and durable downstream delivery; implement bounded replay, backpressure, and graceful shutdown.
 4. Add PostgreSQL configuration/version persistence, validated Excel import, immutable snapshots, and safe hot reload.
-5. Add multi-instance device leases/sharding, health/metrics endpoints, security hardening, and production Compose profiles.
-6. Run integration tests, physical-device interoperability tests, fault injection, and 5,000-device load tests.
+5. Add device leases/sharding for multi-instance operation, health/metrics endpoints, security hardening, and production Compose profiles.
+6. Run integration tests, physical-device tests, fault injection, and 5,000-device load tests.
 
 ## Safety
 
-All write execution remains disabled. Do not connect to production control equipment until the full read path is validated against actual devices and all operational safety reviews are complete.
+All write execution remains disabled. Do not connect to production control equipment until the read path is validated against actual devices and operational safety reviews are complete.
