@@ -2,75 +2,80 @@
 
 Repository: `https://github.com/likongshun/chat`
 
-## Implemented source scope
+## Implemented
 
 ### Stage 1 — Excel configuration
-- Five-sheet loader: Devices, Points, Processing, WriteRules, Enums.
-- Header-name based column resolution and validation of IDs, model references, function codes, data types, register ranges, numeric values, and disabled write policy.
-- Atomic reload retaining the last known-good configuration snapshot.
+- Five-sheet workbook loader: Devices, Points, Processing, WriteRules, Enums.
+- Header-name based column resolution and validation of IDs, model references, function codes, data types, register ranges, numeric values, processing parameters, and disabled write policy.
+- Atomic configuration snapshot manager; failed reload retains the last known-good snapshot.
+- See `docs/CONFIGURATION.md`.
 
 ### Stage 2 — Modbus TCP
-- Persistent TCP connection per client, serialized requests, reconnect after transport/protocol errors.
+- Persistent TCP connection per device client, serialized requests, reconnect after transport/protocol errors.
 - MBAP transaction/protocol/unit validation.
 - Read functions FC01, FC02, FC03, FC04 with protocol limits of 2,000 bits and 125 registers.
-- Read batching by function/model/read group, with address-span mapping.
+- Read batching by function/model/read group.
 - Decoding for signed/unsigned integers, FLOAT32/FLOAT64, STRING and BOOL.
 - No Modbus write API is exposed.
 
 ### Stage 3 — collection scheduler
 - One serialized polling loop per enabled device and global in-flight cap (default 500).
-- Per-device intervals, configurable timeout, initial stagger, exponential backoff with jitter.
-- Bounded output channel with explicit backpressure.
-- Poll/error/timeout/sample/in-flight/duration metrics and graceful shutdown.
+- Per-device interval, timeout, initial stagger, exponential backoff with jitter.
+- Bounded output channel and explicit backpressure.
+- Atomic poll/error/timeout/sample/in-flight/duration metrics and graceful shutdown.
 - Point-level quality/error mapping.
 
-### Stage 4 — WAL durability (implemented foundation; not production complete)
+### Stage 4 — WAL and downstream delivery (integrated foundation; not production complete)
 - Exclusive Linux process lock held for WAL lifetime.
-- Framed Data WAL with CRC32, short-write handling, strict frame validation and active-tail repair before recovery.
+- Framed Data WAL with CRC32, short-write handling, strict frame validation, active-tail repair before recovery.
 - Segmented Data WAL rotation with manifest-managed active/first segment boundaries.
-- Independent MQTT and Influx ACK records, strict sink/sequence/event-ID validation, and recovery-time ACK-to-data identity checks.
-- `PendingWithAcks()` returns independent per-sink ACK state for replay decisions.
-- Immutable sequence-specific checkpoint generations. Checkpoint advances only across a fully ACKed sequence prefix; MANIFEST is the commit point.
-- ACK log compaction occurs only after the checkpoint MANIFEST commit and preserves ACKs above the checkpoint boundary.
-- Reclaim advances MANIFEST before deleting only fully checkpoint-covered, non-active segments. Recovery cleans obsolete leftovers after a partial deletion and fails closed if a required segment is missing.
-- Sequence numbering resumes from the committed checkpoint and retained records, preventing reuse after reclaim.
-- Linux ACK reserve preallocation via `fallocate`; ACK write/sync ENOSPC paths release reserve and retry. Startup can still recover when reserve allocation encounters ENOSPC.
+- Independent MQTT and Influx ACK records; strict sink/sequence/event-ID validation and recovery-time ACK-to-data identity checks.
+- `PendingWithAcks()` exposes independent sink state for replay.
+- Immutable sequence-specific checkpoints; only a fully acknowledged sequence prefix is checkpointed, with MANIFEST as commit point.
+- ACK compaction runs after checkpoint commit and preserves ACKs above the committed boundary.
+- Reclaim commits the new manifest boundary before deleting only fully covered non-active segments. Recovery cleans leftover old segments after partial deletion and fails closed on missing required segments.
+- Sequence numbering resumes from the checkpoint and retained records; no reuse after reclaim.
+- Batched Data WAL append: scheduler samples are buffered up to 1,000 records or 10 ms, reducing fsync frequency.
+- Delivery worker retries MQTT and Influx independently, skips a sink already ACKed, and persists each ACK before checkpoint advancement.
+- MQTT sink uses Eclipse Paho and waits for QoS 1 publish acknowledgements.
+- InfluxDB v2 sink writes line protocol over HTTP; successful 2xx response is treated as the write acknowledgement.
+- Collector command now starts Modbus polling, WAL persistence, and downstream delivery when InfluxDB credentials are configured.
 
-Remaining WAL gaps:
+Remaining WAL/delivery gaps:
 - ACK WAL is still a single file, not segmented.
-- Checkpoint currently represents a fully acknowledged prefix; it is not a full pending-record snapshot with per-sink state.
+- Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
 - Manifest/checkpoint checksum and explicit checkpoint reference fields are not implemented.
 - Automatic ACK reserve replenishment, filesystem-wide warning/critical/stop watermarks, and capacity health metrics are not implemented.
 - Unified fsync metrics and process-kill/disk-full fault injection are not complete.
-- No production durability guarantee should be claimed until these gaps and target-filesystem fault tests are closed.
+- MQTT integration tests against a real broker and InfluxDB integration tests against a real server are still required.
+- Do not claim production durability until these gaps and target-filesystem fault tests are closed.
 
-### Stage 4 — downstream delivery (not integrated)
-- A basic Sink/Dispatcher interface exists. Scheduler results are now serialized and batch-appended to WAL with a 10 ms / 1,000-record batching bound.
-- MQTT QoS 1 and InfluxDB adapters, live WAL replay loop, and end-to-end delivery are not yet integrated.
-- Current collector command loads Excel configuration and opens WAL, then waits for shutdown; it does not yet run the Modbus polling pipeline.
+### Stage 5 — PostgreSQL configuration management (not integrated)
+- PostgreSQL is provisioned by Compose, but the Go application does not yet persist/import configuration versions in PostgreSQL.
+- Device leases/sharding and multi-instance ownership are not implemented.
 
-### Deployment foundation
+### Deployment
 - Multi-stage Dockerfile builds a non-root collector image.
-- Docker Compose provisions collector, PostgreSQL 16, Mosquitto 2, and InfluxDB 2.7 with persistent volumes.
-- PostgreSQL/MQTT/InfluxDB are infrastructure services only; they are not yet wired into the Go application.
-- Mosquitto allows anonymous access for local development only. Production requires authentication, ACLs, TLS, and secret management.
+- Compose provisions collector, PostgreSQL 16, Mosquitto 2, and InfluxDB 2.7 with persistent volumes.
+- Collector polls Modbus devices, buffers to WAL, and delivers to MQTT/Influx when configured.
+- PostgreSQL remains infrastructure-only.
+- Mosquitto anonymous access is development-only; production requires authentication, ACLs, TLS, and managed secrets.
 - See `docs/DOCKER_COMPOSE.md`.
 
-## Verification status
+## Verification
 
-- Commit `31ac68b74368942f8b285b53ebd4ce347ca399e1` passed Go CI, Docker Compose configuration validation, and Docker image build.
-- WAL changes after that commit are undergoing their own Go CI runs; do not infer their result from the earlier successful run.
-- Unit tests cover lock exclusion, ACK validation and identity recovery, torn active-tail repair, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, per-sink pending state, batch append, scheduler-to-WAL persistence, InfluxDB line protocol, and independent sink retry. The newest changes still require a successful CI run.
-- No physical Modbus device interoperability test, process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
+- Commit `5e7b5d52be2f1b6ea21afbe2e2f3637c9b31bbb7` passed Go unit tests, `go vet`, race tests across all Go packages, Compose config validation, and Docker image build. This was before the newest delivery integration changes.
+- The newest MQTT/Influx, delivery worker, WAL checkpoint and processing changes have separate GitHub Actions runs in progress; their success must be checked before release.
+- Unit tests cover WAL locking, ACK identity, torn-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity, partial reclaim cleanup, missing-segment fail-closed behavior, per-sink ACK state, batch append, delivery retry, Influx line protocol, processing operators, and scheduler-to-WAL persistence.
+- No physical Modbus device test, full process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
-## Remaining work in sequence
+## Remaining work
 
-1. Finish WAL format checksums/migration, segmented ACK WAL, reserve replenishment, capacity watermarks, unified fsync instrumentation, and process-kill/disk-full tests.
-2. Implement MQTT QoS 1 and InfluxDB adapters with independent durable ACKs and idempotent event identity.
-3. Connect scheduler output to WAL and durable downstream delivery; implement bounded replay, backpressure, and graceful shutdown.
-4. Add PostgreSQL configuration/version persistence, validated Excel import, immutable snapshots, and safe hot reload.
-5. Add device leases/sharding for multi-instance operation, health/metrics endpoints, security hardening, and production Compose profiles.
-6. Run integration tests, physical-device tests, fault injection, and 5,000-device load tests.
+1. Finish WAL checksum/migration, segmented ACK WAL, reserve replenishment, capacity watermarks, fsync instrumentation, and crash/disk-full fault tests.
+2. Add PostgreSQL configuration/version storage, Excel import transactions, immutable snapshots, and safe hot reload.
+3. Add device leases/sharding for multi-instance collection.
+4. Add Prometheus metrics/health endpoints, structured logs, production Compose profile, MQTT authentication/TLS and secrets.
+5. Run broker/Influx integration tests, physical device interoperability, fault injection, and 5,000-device load tests.
 
 ## Safety
 
