@@ -17,6 +17,7 @@ services:
       WAL_SEGMENT_BYTES: ${WAL_SEGMENT_BYTES:-67108864}
       MAX_WAL_BYTES: ${MAX_WAL_BYTES:-10737418240}
       ACK_RESERVE_BYTES: ${ACK_RESERVE_BYTES:-67108864}
+      METRICS_ADDR: ${METRICS_ADDR:-:9090}
       MQTT_BROKER: ${MQTT_BROKER:-tcp://mqtt:1883}
       MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-modbus-collector}
       MQTT_USERNAME: ${MQTT_USERNAME:-}
@@ -32,6 +33,13 @@ services:
       DELIVERY_RETRY_INTERVAL: ${DELIVERY_RETRY_INTERVAL:-1s}
     volumes:
       - collector_wal:/data/wal
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9090/healthz >/dev/null"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
     read_only: true
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
