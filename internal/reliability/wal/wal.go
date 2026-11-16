@@ -41,11 +41,15 @@ func (w *WAL) repairActiveTails()error{
 
 func (w *WAL) recover()error{
  if e:=w.cleanupObsoleteSegments();e!=nil{return e}
- files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=w.manifest.CheckpointSeq
- for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+ max:=w.manifest.CheckpointSeq
+ for seg:=w.manifest.FirstSegment;seg<=w.manifest.ActiveSegment;seg++{
+  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
+  if _,e:=os.Stat(p);e!=nil{return fmt.Errorf("required data segment %d is unavailable: %w",seg,e)}
   e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
+  if seg==^uint64(0){break}
  }
- w.next=max+1;if w.next==0{w.next=1};return nil
+ if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
+ w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")};return nil
 }
 func (w *WAL) openActive()error{
  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e}
@@ -140,7 +144,7 @@ func (w *WAL) Checkpoint(seq uint64)error{
   if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
   e=readFrames(p,func(b []byte)error{
    var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
-   if r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)}
+   if r.Seq>w.manifest.CheckpointSeq&&r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)}
    return nil
   });if e!=nil{return e}
  }
