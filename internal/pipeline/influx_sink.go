@@ -69,6 +69,9 @@ func NewInfluxSink(options InfluxOptions) (*InfluxSink, error) {
 func (s *InfluxSink) Name() string { return "influx" }
 
 func (s *InfluxSink) Publish(ctx context.Context, events []Event) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if s == nil || s.client == nil {
 		return fmt.Errorf("InfluxDB sink is not initialized")
 	}
