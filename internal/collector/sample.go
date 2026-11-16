@@ -18,4 +18,5 @@ type Sample struct {
 	Timestamp time.Time
 	Value     any
 	Quality   Quality
+	Error     string
 }
