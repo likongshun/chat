@@ -14,7 +14,7 @@ import (
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error }
 func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
@@ -62,12 +62,51 @@ func (w *WAL) openActive()error{
 }
 func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir()&&i.Name()!="ack.reserve"{total+=i.Size()};return nil});return total,e}
 func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
- w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed};if eventID==""{return Record{},fmt.Errorf("event_id is required")};if len(payload)==0{return Record{},fmt.Errorf("payload is required")}
- usage,e:=w.diskUsage();if e!=nil{return Record{},e};if usage+int64(len(payload))+256>w.opts.MaxBytes-w.opts.ReserveBytes{return Record{},ErrCapacity}
- if w.data==nil{return Record{},os.ErrClosed}
- r:=Record{Seq:w.next,EventID:eventID,Payload:payload,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(r);if e!=nil{return Record{},e}
- if e=writeFrame(w.data,b);e!=nil{return Record{},e};if w.opts.Sync{if e=w.data.Sync();e!=nil{return Record{},e}};w.next++
- st,e:=w.data.Stat();if e!=nil{return r,e};if st.Size()>=w.opts.SegmentBytes{if e=w.rotate();e!=nil{return r,e}};return r,nil
+ records,e:=w.AppendBatch([]AppendInput{{EventID:eventID,Payload:payload}})
+ if e!=nil{return Record{},e}
+ return records[0],nil
+}
+
+// AppendBatch assigns a contiguous sequence range and performs one data fsync
+// for the entire batch. A failed write is rolled back to the pre-batch offset;
+// if rollback itself fails, the WAL becomes fail-stop until reopened.
+func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
+ w.mu.Lock();defer w.mu.Unlock()
+ if w.closed{return nil,os.ErrClosed}
+ if w.failed!=nil{return nil,fmt.Errorf("WAL is fail-stopped: %w",w.failed)}
+ if len(events)==0{return nil,nil}
+ var estimate int64
+ for i,event:=range events{
+  if event.EventID==""{return nil,fmt.Errorf("event %d: event_id is required",i)}
+  if len(event.Payload)==0||!json.Valid(event.Payload){return nil,fmt.Errorf("event %d: payload must be valid JSON",i)}
+  estimate+=int64(len(event.Payload))+256
+ }
+ usage,e:=w.diskUsage();if e!=nil{return nil,e}
+ if usage+estimate>w.opts.MaxBytes-w.opts.ReserveBytes{return nil,ErrCapacity}
+ if w.data==nil{return nil,os.ErrClosed}
+ start,e:=w.data.Seek(0,io.SeekEnd);if e!=nil{return nil,e}
+ records:=make([]Record,0,len(events))
+ rollback:=func(cause error)([]Record,error){
+  if err:=w.data.Truncate(start);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("rollback WAL batch: %w",err));return nil,w.failed}
+  if err:=w.data.Sync();err!=nil{w.failed=errors.Join(cause,fmt.Errorf("sync WAL rollback: %w",err));return nil,w.failed}
+  if _,err:=w.data.Seek(0,io.SeekEnd);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("seek WAL after rollback: %w",err));return nil,w.failed}
+  return nil,cause
+ }
+ for i,event:=range events{
+  record:=Record{Seq:w.next+uint64(i),EventID:event.EventID,Payload:event.Payload,CreatedAt:time.Now().UTC()}
+  encoded,err:=json.Marshal(record);if err!=nil{return rollback(err)}
+  if err=writeFrame(w.data,encoded);err!=nil{return rollback(err)}
+  records=append(records,record)
+ }
+ if w.opts.Sync{
+  if e=w.data.Sync();e!=nil{return rollback(e)}
+ }
+ w.next+=uint64(len(records))
+ st,e:=w.data.Stat();if e!=nil{return records,e}
+ if st.Size()>=w.opts.SegmentBytes{
+  if e=w.rotate();e!=nil{return records,fmt.Errorf("records committed but segment rotation failed: %w",e)}
+ }
+ return records,nil
 }
 func (w *WAL) rotate()error{
  if w.data==nil{return os.ErrClosed}
