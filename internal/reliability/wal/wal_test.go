@@ -75,10 +75,7 @@ func TestRecoveryRejectsInvalidACKJSON(t *testing.T) {
  if err=writeFrame(f,[]byte("{invalid json"));err!=nil{t.Fatal(err)}
  if err=f.Sync();err!=nil{t.Fatal(err)}
  _=f.Close()
- w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096})
- if err!=nil{t.Fatal(err)}
- defer w.Close()
- if _,err=w.Pending();err==nil{t.Fatal("expected malformed ACK JSON to be rejected")}
+ if _,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096});err==nil{t.Fatal("expected recovery to reject malformed ACK JSON")}
 }
 
 
