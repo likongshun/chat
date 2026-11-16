@@ -202,7 +202,7 @@ func (c Config) Validate() error {
 	enumKeys := make(map[string]bool)
 	for _, e := range c.Enums {
 		key := e.PointCode + "/" + e.Value
-		if e.PointCode == "" || e.Label == "" || !pointCodes[e.PointCode] {
+		if e.PointCode == "" || e.Label == "" {
 			return fmt.Errorf("invalid enum mapping %q", key)
 		}
 		if enumKeys[key] {
