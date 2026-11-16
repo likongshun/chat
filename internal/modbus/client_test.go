@@ -3,14 +3,13 @@ package modbus
 import (
 	"context"
 	"encoding/binary"
-	"github.com/likongshun/chat/internal/config"
-	"context"
-	"encoding/binary"
 	"io"
 	"net"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/likongshun/chat/internal/config"
 )
 
 func startTestServer(t *testing.T) (string, *atomic.Int32, func()) {
