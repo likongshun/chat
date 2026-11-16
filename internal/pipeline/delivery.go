@@ -24,6 +24,9 @@ type DeliveryWorker struct {
 }
 
 func (w *DeliveryWorker) Run(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if w.Store == nil {
 		return fmt.Errorf("delivery store is required")
 	}
