@@ -75,6 +75,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  if w.closed{return nil,os.ErrClosed}
  if w.failed!=nil{return nil,fmt.Errorf("WAL is fail-stopped: %w",w.failed)}
  if len(events)==0{return nil,nil}
+ if uint64(len(events))>^uint64(0)-w.next{return nil,fmt.Errorf("WAL sequence exhausted")}
  var estimate int64
  for i,event:=range events{
   if event.EventID==""{return nil,fmt.Errorf("event %d: event_id is required",i)}
@@ -112,6 +113,7 @@ func (w *WAL) rotate()error{
  if w.data==nil{return os.ErrClosed}
  if e:=w.data.Sync();e!=nil{return e}
  if e:=w.data.Close();e!=nil{return e}
+ if w.manifest.ActiveSegment==^uint64(0){w.data=nil;return fmt.Errorf("WAL segment sequence exhausted")}
  old:=w.manifest.ActiveSegment
  w.manifest.ActiveSegment++
  if e:=w.saveManifest();e!=nil{w.manifest.ActiveSegment=old;_ = w.openDataOnly();return e}
