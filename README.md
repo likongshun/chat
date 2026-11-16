@@ -1,23 +1,23 @@
 # Modbus Collection Engine
 
-Go-based Modbus TCP collection engine with Excel-driven device configuration and a durable WAL foundation.
+Go-based Modbus TCP collection engine with Excel-driven device configuration and a durable local WAL foundation.
 
-> The repository is under active staged development. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for implemented scope and verification status.
+> The repository is under active staged development. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for exact implemented scope and verification status.
 
 ## Docker Compose
 
-Copy `.env.example` to `.env`, replace all `CHANGE_ME` secrets, then run:
-
 ```sh
 cp .env.example .env
+# Replace all CHANGE_ME values in .env with strong random secrets.
 docker compose config
 docker compose up -d --build
 docker compose ps
+docker compose logs -f collector
 ```
 
 See [Docker Compose deployment](docs/DOCKER_COMPOSE.md) for volumes, operations, and production hardening.
 
-**Current limitation:** Compose provisions PostgreSQL, Mosquitto, and InfluxDB, but the current collector process only loads the Excel configuration and opens the WAL. The live Modbus polling and MQTT/InfluxDB delivery path is not yet integrated. The bundled anonymous MQTT configuration is development-only.
+The current collector reads the Excel configuration, polls enabled Modbus TCP devices, and batches samples into the local WAL. MQTT and InfluxDB containers are provisioned by Compose but their delivery adapters and replay worker are not yet integrated into the application. The anonymous Mosquitto configuration is development-only.
 
 ## Local development
 
