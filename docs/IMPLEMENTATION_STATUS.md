@@ -45,20 +45,24 @@ Remaining WAL/delivery gaps:
 - ACK WAL is still a single file, not segmented.
 - Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
 - Manifest/checkpoint checksum and explicit checkpoint reference fields are not implemented.
-- Automatic ACK reserve replenishment, filesystem-wide warning/critical/stop watermarks, and capacity health metrics are not implemented.
+- Automatic ACK reserve replenishment and filesystem-wide warning/critical/stop watermarks are not implemented. Basic WAL capacity rejection, disk usage, pending and segment metrics are exposed.
 - Unified fsync metrics and process-kill/disk-full fault injection are not complete.
-- MQTT integration tests against a real broker and InfluxDB integration tests against a real server are still required.
+- MQTT, InfluxDB and PostgreSQL integration tests are included in the Compose-backed CI job; physical-device and production-filesystem tests are still required.
 - Do not claim production durability until these gaps and target-filesystem fault tests are closed.
 
-### Stage 5 — PostgreSQL configuration management (not integrated)
-- PostgreSQL is provisioned by Compose, but the Go application does not yet persist/import configuration versions in PostgreSQL.
-- Device leases/sharding and multi-instance ownership are not implemented.
+### Stage 5 — PostgreSQL configuration management (version store integrated)
+- PostgreSQL schema stores immutable JSONB configuration snapshots, SHA-256 checksums, source metadata, and creation timestamps.
+- Excel import validates before inserting a version and switching the active pointer in one transaction.
+- Startup loads and validates the active version; if none exists, the workbook is imported as the initial version.
+- Explicit version activation and version history listing are implemented.
+- The active configuration version is attached to each sample and persisted to InfluxDB.
+- Automatic hot reload, an administrative import/activation API, and device leases/sharding are not implemented.
 
 ### Deployment
 - Multi-stage Dockerfile builds a non-root collector image.
 - Compose provisions collector, PostgreSQL 16, Mosquitto 2, and InfluxDB 2.7 with persistent volumes.
 - Collector polls Modbus devices, buffers to WAL, and delivers to MQTT/Influx when configured.
-- PostgreSQL remains infrastructure-only.
+- PostgreSQL is connected to the collector as the versioned configuration repository.
 - Mosquitto anonymous access is development-only; production requires authentication, ACLs, TLS, and managed secrets.
 - See `docs/DOCKER_COMPOSE.md`.
 
@@ -74,7 +78,7 @@ Remaining WAL/delivery gaps:
 1. Finish WAL checksum/migration, segmented ACK WAL, reserve replenishment, capacity watermarks, fsync instrumentation, and crash/disk-full fault tests.
 2. Add PostgreSQL configuration/version storage, Excel import transactions, immutable snapshots, and safe hot reload.
 3. Add device leases/sharding for multi-instance collection.
-4. Add Prometheus metrics/health endpoints, structured logs, production Compose profile, MQTT authentication/TLS and secrets.
+4. Expand Prometheus fsync/capacity metrics, structured logs, production Compose profile, MQTT authentication/TLS and Docker secrets.
 5. Run broker/Influx integration tests, physical device interoperability, fault injection, and 5,000-device load tests.
 
 ## Safety
