@@ -60,7 +60,7 @@ func (w *WAL) openActive()error{
 }
 func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir()&&i.Name()!="ack.reserve"{total+=i.Size()};return nil});return total,e}
 func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
- w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed}
+ w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed};if eventID==""{return Record{},fmt.Errorf("event_id is required")};if len(payload)==0{return Record{},fmt.Errorf("payload is required")}
  usage,e:=w.diskUsage();if e!=nil{return Record{},e};if usage+int64(len(payload))+256>w.opts.MaxBytes-w.opts.ReserveBytes{return Record{},ErrCapacity}
  if w.data==nil{return Record{},os.ErrClosed}
  r:=Record{Seq:w.next,EventID:eventID,Payload:payload,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(r);if e!=nil{return Record{},e}
