@@ -63,6 +63,9 @@ func NewMQTTSink(options MQTTOptions) (*MQTTSink, error) {
 func (s *MQTTSink) Name() string { return "mqtt" }
 
 func (s *MQTTSink) Publish(ctx context.Context, events []Event) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if s == nil || s.client == nil {
 		return fmt.Errorf("MQTT sink is not initialized")
 	}
