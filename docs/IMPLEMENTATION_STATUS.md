@@ -60,7 +60,7 @@ Remaining WAL gaps:
 
 - Commit `31ac68b74368942f8b285b53ebd4ce347ca399e1` passed Go CI, Docker Compose configuration validation, and Docker image build.
 - WAL changes after that commit are undergoing their own Go CI runs; do not infer their result from the earlier successful run.
-- Unit tests cover lock exclusion, ACK validation and identity recovery, torn active-tail repair, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, per-sink pending state, batch append, and scheduler-to-WAL persistence. The newest changes still require a successful CI run.
+- Unit tests cover lock exclusion, ACK validation and identity recovery, torn active-tail repair, checkpoint generation isolation, ACK compaction, sequence continuity after reclaim, partial deletion cleanup, missing-segment fail-closed behavior, per-sink pending state, batch append, scheduler-to-WAL persistence, InfluxDB line protocol, and independent sink retry. The newest changes still require a successful CI run.
 - No physical Modbus device interoperability test, process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work in sequence
