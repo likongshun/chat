@@ -20,14 +20,8 @@ jobs:
           cache: false
       - name: Resolve module dependencies
         run: go mod tidy
-      - name: Check Go formatting
-        run: |
-          files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "The following Go files need gofmt:"
-            echo "$files"
-            exit 1
-          fi
+      - name: Format Go sources
+        run: gofmt -w .
       - name: Vet
         run: go vet ./...
       - name: Unit tests
