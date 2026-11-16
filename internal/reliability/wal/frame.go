@@ -93,7 +93,7 @@ func repairFrameTail(path string) error {
 		}
 		if readErr != nil {
 			if readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
-				return f.Truncate(offset)
+				if err:=f.Truncate(offset);err!=nil{return err};return f.Sync()
 			}
 			return readErr
 		}
