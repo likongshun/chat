@@ -23,3 +23,15 @@ type AppendInput struct {
  EventID string
  Payload json.RawMessage
 }
+
+type Stats struct {
+ DiskBytes int64
+ MaxBytes int64
+ DiskUsedRatio float64
+ PendingRecords int
+ OldestPendingAge time.Duration
+ SegmentCount int
+ CheckpointSeq uint64
+ FirstSegment uint64
+ ActiveSegment uint64
+}
