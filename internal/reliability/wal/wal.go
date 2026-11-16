@@ -193,6 +193,45 @@ func (w *WAL) PendingWithAcks()([]PendingRecord,error){
  }
  return out,nil
 }
+// CheckpointReady advances the committed prefix as far as both downstream
+// sinks have durably acknowledged every preceding record, then reclaims safe
+// segments. It is safe to call periodically from the delivery worker.
+func (w *WAL) CheckpointReady()(uint64,error){
+ w.mu.Lock()
+ if w.closed{w.mu.Unlock();return 0,os.ErrClosed}
+ current:=w.manifest.CheckpointSeq
+ acked,e:=w.ackState()
+ if e!=nil{w.mu.Unlock();return current,e}
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"))
+ if e!=nil{w.mu.Unlock();return current,e}
+ sort.Strings(files)
+ candidate:=current+1
+ for _,p:=range files{
+  var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
+  if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{
+   var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
+   if r.Seq<=current{return nil}
+   if r.Seq!=candidate{return fmt.Errorf("non-contiguous WAL sequence: got %d, expected %d",r.Seq,candidate)}
+   if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{return errCheckpointBlocked}
+   candidate++
+   return nil
+  })
+  if errors.Is(e,errCheckpointBlocked){e=nil;goto ready}
+  if e!=nil{w.mu.Unlock();return current,e}
+ }
+ready:
+ target:=candidate-1
+ w.mu.Unlock()
+ if target>current{
+  if e=w.Checkpoint(target);e!=nil{return target,e}
+ }
+ if e=w.Reclaim();e!=nil{return target,e}
+ return target,nil
+}
+
+var errCheckpointBlocked=errors.New("checkpoint blocked by pending downstream ACK")
+
 func (w *WAL) Checkpoint(seq uint64)error{
  w.mu.Lock();defer w.mu.Unlock()
  if w.closed{return os.ErrClosed}
