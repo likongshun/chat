@@ -11,6 +11,7 @@ import (
 
 	"github.com/likongshun/chat/internal/config"
 	"github.com/likongshun/chat/internal/modbus"
+	"github.com/likongshun/chat/internal/processing"
 )
 
 type ModbusPoller struct {
@@ -83,6 +84,9 @@ func (p *ModbusPoller) Poll(ctx context.Context, d config.Device) ([]Sample, err
 				} else {
 					value, decodeErr = modbus.DecodeRegisters(point, data.Registers[int(span.Offset):end])
 				}
+			}
+			if decodeErr == nil {
+				value, decodeErr = processing.Apply(point.PointCode, value, p.Config.Processing, p.Config.Enums)
 			}
 			if decodeErr != nil {
 				sample.Quality = QualityBad
