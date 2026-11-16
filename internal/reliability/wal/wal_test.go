@@ -119,3 +119,20 @@ func TestRecoveryCleansSegmentsLeftAfterCommittedReclaim(t *testing.T) {
  defer w.Close()
  if _,err=os.Stat(oldPath);!os.IsNotExist(err){t.Fatalf("obsolete segment was not cleaned on recovery: %v",err)}
 }
+
+
+func TestSequenceContinuesAfterAllCoveredSegmentsReclaimed(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,SegmentBytes:1,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ first,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:first.Seq,Sink:sink,EventID:first.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Checkpoint(first.Seq);err!=nil{t.Fatal(err)}
+ if err=w.Reclaim();err!=nil{t.Fatal(err)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+ w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ second,err:=w.Append("evt-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
+ if second.Seq<=first.Seq{t.Fatalf("sequence reused after reclaim: first=%d second=%d",first.Seq,second.Seq)}
+}
