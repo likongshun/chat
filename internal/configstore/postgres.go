@@ -53,17 +53,15 @@ func (r *Repository) Migrate(ctx context.Context) error {
 	if r == nil || r.pool == nil {
 		return fmt.Errorf("configuration repository is not initialized")
 	}
-	schema := "CREATE TABLE IF NOT EXISTS modbus_config_versions (" +
-		"id BIGSERIAL PRIMARY KEY, checksum TEXT NOT NULL, source TEXT NOT NULL, " +
-		"snapshot JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" +
-		"CREATE TABLE IF NOT EXISTS modbus_config_active (" +
-		"singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), " +
-		"version_id BIGINT NOT NULL REFERENCES modbus_config_versions(id), " +
-		"updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" +
-		"CREATE INDEX IF NOT EXISTS idx_modbus_config_versions_created_at " +
-		"ON modbus_config_versions (created_at DESC);"
-	if _, err := r.pool.Exec(ctx, schema); err != nil {
-		return fmt.Errorf("migrate configuration schema: %w", err)
+	statements := []string{
+		"CREATE TABLE IF NOT EXISTS modbus_config_versions (id BIGSERIAL PRIMARY KEY, checksum TEXT NOT NULL, source TEXT NOT NULL, snapshot JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+		"CREATE TABLE IF NOT EXISTS modbus_config_active (singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton), version_id BIGINT NOT NULL REFERENCES modbus_config_versions(id), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())",
+		"CREATE INDEX IF NOT EXISTS idx_modbus_config_versions_created_at ON modbus_config_versions (created_at DESC)",
+	}
+	for _, statement := range statements {
+		if _, err := r.pool.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("migrate configuration schema: %w", err)
+		}
 	}
 	return nil
 }
@@ -103,7 +101,7 @@ func (r *Repository) Import(ctx context.Context, cfg config.Config, source strin
 	var versionID int64
 	if err := tx.QueryRow(ctx,
 		"INSERT INTO modbus_config_versions (checksum, source, snapshot) VALUES ($1, $2, $3) RETURNING id",
-		checksum, source, snapshot,
+		checksum, source, string(snapshot),
 	).Scan(&versionID); err != nil {
 		return 0, fmt.Errorf("insert configuration version: %w", err)
 	}
@@ -176,7 +174,7 @@ func (r *Repository) ListVersions(ctx context.Context, limit int) ([]Version, er
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query := "SELECT v.id, v.checksum, v.source, v.created_at, (a.version_id = v.id) AS active " +
+	query := "SELECT v.id, v.checksum, v.source, v.created_at, COALESCE(a.version_id = v.id, FALSE) AS active " +
 		"FROM modbus_config_versions v LEFT JOIN modbus_config_active a ON a.singleton = TRUE " +
 		"ORDER BY v.id DESC LIMIT $1"
 	rows, err := r.pool.Query(ctx, query, limit)
