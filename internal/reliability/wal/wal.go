@@ -202,6 +202,8 @@ func (w *WAL) CheckpointReady()(uint64,error){
  current:=w.manifest.CheckpointSeq
  acked,e:=w.ackState()
  if e!=nil{w.mu.Unlock();return current,e}
+ needsCompaction:=false
+ for _,sinkState:=range acked{for seq:=range sinkState{if seq<=current{needsCompaction=true;break}}}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"))
  if e!=nil{w.mu.Unlock();return current,e}
  sort.Strings(files)
@@ -223,7 +225,7 @@ func (w *WAL) CheckpointReady()(uint64,error){
 ready:
  target:=candidate-1
  w.mu.Unlock()
- if target>current{
+ if target>current||needsCompaction{
   if e=w.Checkpoint(target);e!=nil{return target,e}
  }
  if e=w.Reclaim();e!=nil{return target,e}
