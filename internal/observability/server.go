@@ -28,14 +28,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if addr == "" {
 		addr = ":9090"
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.HandleFunc("/readyz", s.ready)
-	mux.HandleFunc("/metrics", s.metrics)
-	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: addr, Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -54,6 +47,17 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+func (s *Server) Handler() http.Handler {
+ mux := http.NewServeMux()
+ mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+  w.WriteHeader(http.StatusOK)
+  _, _ = w.Write([]byte("ok\\n"))
+ })
+ mux.HandleFunc("/readyz", s.ready)
+ mux.HandleFunc("/metrics", s.metrics)
+ return mux
 }
 
 func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
