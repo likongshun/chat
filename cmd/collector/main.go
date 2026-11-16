@@ -103,7 +103,7 @@ func main() {
 	log.Printf("collector started: devices=%d points=%d WAL=%s workers=%d",
 		len(cfg.Devices), len(cfg.Points), dir, envInt("POLL_WORKERS", 500))
 
-	if err := pipeline.PersistResults(results, store); err != nil {
+	if err := pipeline.PersistResults(ctx, results, store); err != nil {
 		log.Printf("persist collection result: %v; stopping collection", err)
 		stop()
 	}
