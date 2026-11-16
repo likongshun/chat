@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/configstore"
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/observability"
 	"github.com/likongshun/chat/internal/reliability/wal"
@@ -18,10 +22,16 @@ import (
 
 func main() {
 	configPath := envString("CONFIG_XLSX", "./configs/modbus_device_config.xlsx")
-	cfg, err := config.LoadXLSX(configPath)
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	cfg, configVersion, configRepo, err := loadConfiguration(startupCtx, configPath)
+	startupCancel()
 	if err != nil {
 		log.Fatalf("load configuration: %v", err)
 	}
+	if configRepo != nil {
+		defer configRepo.Close()
+	}
+	log.Printf("configuration loaded: version=%d devices=%d points=%d", configVersion, len(cfg.Devices), len(cfg.Points))
 
 	dir := envString("WAL_DIR", "./data/wal")
 	store, err := wal.Open(wal.Options{
@@ -37,6 +47,7 @@ func main() {
 
 	poller := &collector.ModbusPoller{
 		Config: cfg,
+		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
 	collectorMetrics := &collector.Metrics{}
@@ -123,6 +134,77 @@ func main() {
 	if err := store.Close(); err != nil {
 		log.Printf("close WAL: %v", err)
 	}
+}
+
+func loadConfiguration(ctx context.Context, path string) (config.Config, int64, *configstore.Repository, error) {
+	dsn := os.Getenv("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = postgresDSN()
+	}
+	if dsn == "" {
+		cfg, err := config.LoadXLSX(path)
+		return cfg, 0, nil, err
+	}
+	repository, err := configstore.Open(ctx, dsn)
+	if err != nil {
+		return config.Config{}, 0, nil, err
+	}
+	fail := func(err error) (config.Config, int64, *configstore.Repository, error) {
+		repository.Close()
+		return config.Config{}, 0, nil, err
+	}
+	if err := repository.Migrate(ctx); err != nil {
+		return fail(err)
+	}
+	if envBool("CONFIG_IMPORT_ON_START", false) {
+		if _, err := repository.ImportXLSX(ctx, path); err != nil {
+			return fail(err)
+		}
+	}
+	cfg, version, err := repository.LoadActive(ctx)
+	if errors.Is(err, configstore.ErrNoActiveVersion) {
+		if _, importErr := repository.ImportXLSX(ctx, path); importErr != nil {
+			return fail(importErr)
+		}
+		cfg, version, err = repository.LoadActive(ctx)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	return cfg, version, repository, nil
+}
+
+func postgresDSN() string {
+	host := os.Getenv("POSTGRES_HOST")
+	if host == "" {
+		return ""
+	}
+	port := envString("POSTGRES_PORT", "5432")
+	user := envString("POSTGRES_USER", "modbus")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	database := envString("POSTGRES_DB", "modbus")
+	u := &url.URL{
+		Scheme: "postgres",
+		User: url.UserPassword(user, password),
+		Host: net.JoinHostPort(host, port),
+		Path: database,
+	}
+	query := u.Query()
+	query.Set("sslmode", envString("POSTGRES_SSLMODE", "disable"))
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func envString(key, fallback string) string {
