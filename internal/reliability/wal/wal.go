@@ -30,8 +30,11 @@ func (w *WAL) recover()error{
  w.next=max+1;if w.next==0{w.next=1};return nil
 }
 func (w *WAL) openActive()error{
- p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e};w.data=f
- w.ack,e=os.OpenFile(filepath.Join(w.opts.Dir,"ack.wal"),os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{f.Close();return e};return nil
+ p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e}
+ if e=repairFrameTail(p);e!=nil{f.Close();return e};w.data=f
+ ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
+ w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{f.Close();return e}
+ if e=repairFrameTail(ackPath);e!=nil{f.Close();w.ack.Close();return e};return nil
 }
 func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir(){total+=i.Size()};return nil});return total,e}
 func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
