@@ -17,6 +17,19 @@ services:
       WAL_SEGMENT_BYTES: ${WAL_SEGMENT_BYTES:-67108864}
       MAX_WAL_BYTES: ${MAX_WAL_BYTES:-10737418240}
       ACK_RESERVE_BYTES: ${ACK_RESERVE_BYTES:-67108864}
+      MQTT_BROKER: ${MQTT_BROKER:-tcp://mqtt:1883}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-modbus-collector}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TOPIC: ${MQTT_TOPIC:-modbus/telemetry}
+      INFLUXDB_URL: ${INFLUXDB_URL:-http://influxdb:8086}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-modbus}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-telemetry}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-${INFLUXDB_ADMIN_TOKEN}}
+      SINK_TIMEOUT: ${SINK_TIMEOUT:-10s}
+      DELIVERY_BATCH_SIZE: ${DELIVERY_BATCH_SIZE:-500}
+      DELIVERY_POLL_INTERVAL: ${DELIVERY_POLL_INTERVAL:-1s}
+      DELIVERY_RETRY_INTERVAL: ${DELIVERY_RETRY_INTERVAL:-1s}
     volumes:
       - collector_wal:/data/wal
     read_only: true
@@ -26,6 +39,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    depends_on:
+      mqtt:
+        condition: service_started
+      influxdb:
+        condition: service_healthy
     networks:
       - backend
 
