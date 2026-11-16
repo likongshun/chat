@@ -192,6 +192,10 @@ func runCollection(
 			case <-drainTimer.C:
 				cancelWriter()
 				persistErr = <-persistDone
+				for range results {
+					// Discard only after the bounded shutdown drain expired; wait
+					// for scheduler workers to exit before closing Modbus clients.
+				}
 				log.Printf("WAL writer drain timed out during shutdown")
 			}
 			if !drainTimer.Stop() {
@@ -209,6 +213,8 @@ func runCollection(
 			persistErr := <-persistDone
 			cancelWriter()
 			if persistErr != nil {
+				for range results {
+				}
 				_ = engine.Close()
 				return fmt.Errorf("flush samples before configuration switch: %w", persistErr)
 			}
@@ -228,6 +234,10 @@ func runCollection(
 		case persistErr := <-persistDone:
 			cancelPoll()
 			cancelWriter()
+			if persistErr != nil {
+				for range results {
+				}
+			}
 			_ = engine.Close()
 			if persistErr != nil {
 				return persistErr
