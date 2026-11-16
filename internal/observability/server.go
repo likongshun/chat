@@ -61,7 +61,7 @@ func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if stats.MaxBytes > 0 && stats.DiskBytes >= stats.MaxBytes {
+	if stats.AdmissionLimitBytes > 0 && stats.DiskBytes >= stats.AdmissionLimitBytes {
 		http.Error(w, "WAL capacity exhausted", http.StatusServiceUnavailable)
 		return
 	}
@@ -97,6 +97,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "modbus_wal_disk_bytes %d\n", stats.DiskBytes)
 			fmt.Fprintln(w, "# TYPE modbus_wal_disk_used_ratio gauge")
 			fmt.Fprintf(w, "modbus_wal_disk_used_ratio %f\n", stats.DiskUsedRatio)
+			fmt.Fprintln(w, "# TYPE modbus_wal_capacity_rejections_total counter")
+			fmt.Fprintf(w, "modbus_wal_capacity_rejections_total %d\n", stats.CapacityRejections)
 			fmt.Fprintln(w, "# TYPE modbus_wal_pending_records gauge")
 			fmt.Fprintf(w, "modbus_wal_pending_records %d\n", stats.PendingRecords)
 			fmt.Fprintln(w, "# TYPE modbus_wal_oldest_pending_age_seconds gauge")
