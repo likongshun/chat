@@ -136,3 +136,25 @@ func TestSequenceContinuesAfterAllCoveredSegmentsReclaimed(t *testing.T) {
  second,err:=w.Append("evt-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
  if second.Seq<=first.Seq{t.Fatalf("sequence reused after reclaim: first=%d second=%d",first.Seq,second.Seq)}
 }
+
+
+func TestOpenRepairsTornActiveDataAndACKTailsBeforeRecovery(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ r,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ if err=w.Ack(Ack{Seq:r.Seq,Sink:"mqtt",EventID:r.EventID});err!=nil{t.Fatal(err)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+ dataPath:=filepath.Join(dir,"data-00000000000000000001.wal")
+ for _,path:=range []string{dataPath,filepath.Join(dir,"ack.wal")}{
+  f,err:=os.OpenFile(path,os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
+  if _,err=f.Write([]byte{0,0,0});err!=nil{t.Fatal(err)}
+  if err=f.Sync();err!=nil{t.Fatal(err)}
+  _=f.Close()
+ }
+ w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatalf("active torn tails should be repaired before recovery: %v",err)}
+ defer w.Close()
+ pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
+ if len(pending)!=1||pending[0].Seq!=r.Seq{t.Fatalf("pending after recovery=%v, want original record",pending)}
+}
