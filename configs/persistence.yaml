@@ -1,0 +1,8 @@
+wal_dir: ./data/wal
+segment_bytes: 67108864
+max_bytes: 10737418240
+reserve_bytes: 67108864
+warning_percent: 70
+critical_percent: 85
+stop_percent: 95
+sync_on_append: true

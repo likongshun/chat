@@ -1,0 +1,87 @@
+package wal
+
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ "path/filepath"
+ "sort"
+ "strings"
+ "sync"
+ "time"
+)
+
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool }
+func Open(o Options)(*WAL,error){
+ if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
+ if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
+ w:=&WAL{opts:o,lock:l,next:1};fail:=func(e error)(*WAL,error){l.close();return nil,e}
+ if err=w.loadManifest();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
+}
+func (w *WAL) loadManifest()error{
+ b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
+ if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};return nil
+}
+func (w *WAL) recover()error{
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files);max:=uint64(0)
+ for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq>max{max=r.Seq};return nil});if e!=nil{return e}
+ }
+ w.next=max+1;if w.next==0{w.next=1};return nil
+}
+func (w *WAL) openActive()error{
+ p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e};w.data=f
+ w.ack,e=os.OpenFile(filepath.Join(w.opts.Dir,"ack.wal"),os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{f.Close();return e};return nil
+}
+func (w *WAL) diskUsage()(int64,error){var total int64;e:=filepath.Walk(w.opts.Dir,func(_ string,i os.FileInfo,e error)error{if e!=nil{return e};if !i.IsDir(){total+=i.Size()};return nil});return total,e}
+func (w *WAL) Append(eventID string,payload json.RawMessage)(Record,error){
+ w.mu.Lock();defer w.mu.Unlock();if w.closed{return Record{},os.ErrClosed}
+ usage,e:=w.diskUsage();if e!=nil{return Record{},e};if usage+int64(len(payload))+256>w.opts.MaxBytes-w.opts.ReserveBytes{return Record{},ErrCapacity}
+ r:=Record{Seq:w.next,EventID:eventID,Payload:payload,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(r);if e!=nil{return Record{},e}
+ if e=writeFrame(w.data,b);e!=nil{return Record{},e};if w.opts.Sync{if e=w.data.Sync();e!=nil{return Record{},e}};w.next++
+ st,e:=w.data.Stat();if e!=nil{return r,e};if st.Size()>=w.opts.SegmentBytes{if e=w.rotate();e!=nil{return r,e}};return r,nil
+}
+func (w *WAL) rotate()error{
+ if e:=w.data.Sync();e!=nil{return e};if e:=w.data.Close();e!=nil{return e};w.manifest.ActiveSegment++;if e:=w.saveManifest();e!=nil{return e};return w.openDataOnly()
+}
+func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
+func (w *WAL) Ack(a Ack)error{w.mu.Lock();defer w.mu.Unlock();if w.closed{return os.ErrClosed};if a.Sink!="mqtt"&&a.Sink!="influx"{return fmt.Errorf("unsupported sink %q",a.Sink)};b,e:=json.Marshal(a);if e!=nil{return e};if e=writeFrame(w.ack,b);e!=nil{return e};return w.ack.Sync()}
+func (w *WAL) ackState()(map[string]map[uint64]bool,error){
+ acked:=map[string]map[uint64]bool{};e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if json.Unmarshal(b,&a)==nil{if acked[a.Sink]==nil{acked[a.Sink]=map[uint64]bool{}};acked[a.Sink][a.Seq]=true};return nil});return acked,e
+}
+func (w *WAL) Pending()([]Record,error){
+ w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return nil,e}
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return nil,e};sort.Strings(files);var out []Record
+ for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)!=nil||r.Seq<=w.manifest.CheckpointSeq{return nil};if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{out=append(out,r)};return nil});if e!=nil{return nil,e}
+ };return out,nil
+}
+func (w *WAL) Checkpoint(seq uint64)error{
+ w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return e}
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
+ for _,p:=range files{e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)};return nil});if e!=nil{return e}}
+ cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()};b,e:=json.Marshal(cp);if e!=nil{return e};if e=atomicFile(filepath.Join(w.opts.Dir,"checkpoint.json"),b);e!=nil{return e}
+ w.manifest.CheckpointSeq=seq;return w.saveManifest()
+}
+func (w *WAL) saveManifest()error{b,e:=json.Marshal(w.manifest);if e!=nil{return e};return atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b)}
+func atomicFile(path string,b []byte)error{
+ tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=f.Sync();e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return d.Sync()
+}
+func (w *WAL) Reclaim()error{
+ w.mu.Lock();defer w.mu.Unlock();files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files)
+ var remove []string;newFirst:=w.manifest.FirstSegment
+ for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg>=w.manifest.ActiveSegment{continue}
+  safe:=true;e=readFrames(p,func(b []byte)error{var r Record;if json.Unmarshal(b,&r)==nil&&r.Seq>w.manifest.CheckpointSeq{safe=false};return nil});if e!=nil{return e}
+  if safe{remove=append(remove,p);if seg>=newFirst{newFirst=seg+1}}
+ }
+ if len(remove)==0{return nil};old:=w.manifest.FirstSegment;w.manifest.FirstSegment=newFirst
+ if e=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
+ for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
+ d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
+}
+func (w *WAL) Close()error{
+ w.mu.Lock();defer w.mu.Unlock();if w.closed{return nil};w.closed=true;var es []string
+ if w.data!=nil{if e:=w.data.Sync();e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
+ if w.ack!=nil{if e:=w.ack.Sync();e!=nil{es=append(es,e.Error())};if e:=w.ack.Close();e!=nil{es=append(es,e.Error())}}
+ if w.lock!=nil{if e:=w.lock.close();e!=nil{es=append(es,e.Error())}};if len(es)>0{return fmt.Errorf("%s",strings.Join(es,"; "))};return nil
+}
