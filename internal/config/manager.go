@@ -20,13 +20,29 @@ func (m *Manager) Current() *Config {
 	return &copy
 }
 
+func NewManager(initial Config) (*Manager, error) {
+	manager := &Manager{}
+	if err := manager.Reload(initial); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+func (m *Manager) Reload(next Config) error {
+	if err := next.Validate(); err != nil {
+		return fmt.Errorf("configuration reload rejected: %w", err)
+	}
+	copy := cloneConfig(next)
+	m.current.Store(&copy)
+	return nil
+}
+
 func (m *Manager) ReloadXLSX(path string) error {
 	next, err := LoadXLSX(path)
 	if err != nil {
 		return fmt.Errorf("configuration reload rejected: %w", err)
 	}
-	m.current.Store(&next)
-	return nil
+	return m.Reload(next)
 }
 
 func cloneConfig(in Config) Config {
