@@ -3,7 +3,6 @@ package processing
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/likongshun/chat/internal/config"
@@ -104,8 +103,4 @@ func number(value any, pointCode, operation string) (float64, error) {
 		return 0, fmt.Errorf("point %s: %s received non-finite input", pointCode, operation)
 	}
 	return n, nil
-}
-
-func EnumKey(value float64) string {
-	return strconv.FormatFloat(value, 'f', -1, 64)
 }
