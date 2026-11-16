@@ -55,7 +55,7 @@ Do not enable PLC/VFD writes by changing Excel alone. A future write feature req
 
 ## Configuration changes and reload
 
-The collector currently loads the workbook at process startup. `config.Manager` supports validated atomic snapshot replacement for callers, but automatic file watching, PostgreSQL-backed version history, and live reload in the running collector are not yet connected. Rebuild/restart the collector after changing the baked-in workbook in the current Compose setup.
+The collector loads the active validated configuration version from PostgreSQL at startup. If no active version exists, it imports the workbook and activates the new version. Set `CONFIG_IMPORT_ON_START=true` to import and activate the workbook on the next startup. The repository also supports explicit version activation and version listing. Automatic file watching and live hot reload of the running scheduler are not yet connected; restart the collector after changing configuration.
 
 ## Adding a device model
 
