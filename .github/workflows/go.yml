@@ -17,12 +17,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
-          cache: true
+          cache: false
+      - name: Resolve and record module checksums
+        run: go mod tidy
       - name: Format Go sources
-        run: gofmt -w .
+        run: test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
       - name: Unit tests
         run: go test ./...
       - name: Race tests
-        run: go test -race ./internal/config ./internal/modbus ./internal/collector
+        run: go test -race ./internal/config ./internal/modbus ./internal/collector ./internal/reliability/...
