@@ -209,3 +209,25 @@ func TestRecoveryRejectsACKEventIDMismatch(t *testing.T) {
  _=f.Close()
  if _,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096});err==nil{t.Fatal("expected mismatched ACK identity to fail recovery")}
 }
+
+
+func TestAppendBatchAssignsContiguousSequences(t *testing.T) {
+ w,err:=Open(Options{Dir:t.TempDir(),MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ records,err:=w.AppendBatch([]AppendInput{
+  {EventID:"batch-1",Payload:json.RawMessage(`{"v":1}`)},
+  {EventID:"batch-2",Payload:json.RawMessage(`{"v":2}`)},
+ })
+ if err!=nil{t.Fatal(err)}
+ if len(records)!=2||records[0].Seq!=1||records[1].Seq!=2{t.Fatalf("batch records=%+v",records)}
+}
+
+func TestAppendBatchRejectsInvalidInputWithoutConsumingSequence(t *testing.T) {
+ w,err:=Open(Options{Dir:t.TempDir(),MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ if _,err=w.AppendBatch([]AppendInput{{EventID:"bad",Payload:json.RawMessage("not-json")}});err==nil{t.Fatal("expected invalid JSON to be rejected")}
+ record,err:=w.Append("good",json.RawMessage(`{"ok":true}`));if err!=nil{t.Fatal(err)}
+ if record.Seq!=1{t.Fatalf("sequence=%d, want 1",record.Seq)}
+}
