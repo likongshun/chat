@@ -59,7 +59,7 @@ func TestOpenRejectsMissingCommittedCheckpoint(t *testing.T) {
  for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r.Seq,Sink:sink,EventID:r.EventID});err!=nil{t.Fatal(err)}}
  if err=w.Checkpoint(r.Seq);err!=nil{t.Fatal(err)}
  if err=w.Close();err!=nil{t.Fatal(err)}
- if err=os.Remove(filepath.Join(dir,"checkpoint.json"));err!=nil{t.Fatal(err)}
+ if err=os.Remove(checkpointPath(dir,r.Seq));err!=nil{t.Fatal(err)}
  if _,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096});err==nil{t.Fatal("expected missing committed checkpoint to fail recovery")}
 }
 
@@ -78,4 +78,44 @@ func TestRecoveryRejectsInvalidACKJSON(t *testing.T) {
  if err!=nil{t.Fatal(err)}
  defer w.Close()
  if _,err=w.Pending();err==nil{t.Fatal("expected malformed ACK JSON to be rejected")}
+}
+
+
+func TestUncommittedCheckpointDoesNotReplaceCommittedGeneration(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ r1,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r1.Seq,Sink:sink,EventID:r1.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Checkpoint(r1.Seq);err!=nil{t.Fatal(err)}
+ oldManifest,err:=os.ReadFile(filepath.Join(dir,"MANIFEST"));if err!=nil{t.Fatal(err)}
+ r2,err:=w.Append("evt-2",json.RawMessage(`{"v":2}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r2.Seq,Sink:sink,EventID:r2.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Checkpoint(r2.Seq);err!=nil{t.Fatal(err)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+ // Simulate a crash before the second manifest commit: old MANIFEST remains authoritative.
+ if err=os.WriteFile(filepath.Join(dir,"MANIFEST"),oldManifest,0600);err!=nil{t.Fatal(err)}
+ w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096})
+ if err!=nil{t.Fatalf("old committed checkpoint must remain recoverable: %v",err)}
+ defer w.Close()
+ pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
+ if len(pending)!=0{t.Fatalf("pending=%d, want 0",len(pending))}
+}
+
+func TestRecoveryCleansSegmentsLeftAfterCommittedReclaim(t *testing.T) {
+ dir:=t.TempDir()
+ w,err:=Open(Options{Dir:dir,SegmentBytes:1,MaxBytes:1<<20,ReserveBytes:4096,Sync:true})
+ if err!=nil{t.Fatal(err)}
+ r,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
+ for _,sink:=range []string{"mqtt","influx"}{if err=w.Ack(Ack{Seq:r.Seq,Sink:sink,EventID:r.EventID});err!=nil{t.Fatal(err)}}
+ if err=w.Checkpoint(r.Seq);err!=nil{t.Fatal(err)}
+ oldPath:=filepath.Join(dir,"data-00000000000000000001.wal")
+ oldBytes,err:=os.ReadFile(oldPath);if err!=nil{t.Fatal(err)}
+ if err=w.Reclaim();err!=nil{t.Fatal(err)}
+ if err=os.WriteFile(oldPath,oldBytes,0600);err!=nil{t.Fatal(err)}
+ if err=w.Close();err!=nil{t.Fatal(err)}
+ w,err=Open(Options{Dir:dir,MaxBytes:1<<20,ReserveBytes:4096})
+ if err!=nil{t.Fatal(err)}
+ defer w.Close()
+ if _,err=os.Stat(oldPath);!os.IsNotExist(err){t.Fatalf("obsolete segment was not cleaned on recovery: %v",err)}
 }
