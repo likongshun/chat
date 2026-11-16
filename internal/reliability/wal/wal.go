@@ -42,13 +42,15 @@ func (w *WAL) repairActiveTails()error{
 func (w *WAL) recover()error{
  if e:=w.cleanupObsoleteSegments();e!=nil{return e}
  max:=w.manifest.CheckpointSeq
+ eventIDs:=make(map[uint64]string)
  for seg:=w.manifest.FirstSegment;seg<=w.manifest.ActiveSegment;seg++{
   p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
   if _,e:=os.Stat(p);e!=nil{return fmt.Errorf("required data segment %d is unavailable: %w",seg,e)}
-  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};return nil});e!=nil{return e}
+  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};if r.Seq>w.manifest.CheckpointSeq{if old,ok:=eventIDs[r.Seq];ok&&old!=r.EventID{return fmt.Errorf("conflicting event IDs for sequence %d",r.Seq)};eventIDs[r.Seq]=r.EventID};return nil});e!=nil{return e}
   if seg==^uint64(0){break}
  }
  if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
+ if e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if e:=json.Unmarshal(b,&a);e!=nil{return e};if a.Seq<=w.manifest.CheckpointSeq{return nil};id,ok:=eventIDs[a.Seq];if !ok{return fmt.Errorf("ACK references unknown sequence %d during recovery",a.Seq)};if id!=a.EventID{return fmt.Errorf("ACK event_id mismatch for sequence %d during recovery",a.Seq)};return nil});e!=nil{return fmt.Errorf("validate ACK references: %w",e)}
  w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")};return nil
 }
 func (w *WAL) openActive()error{
