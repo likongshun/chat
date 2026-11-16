@@ -30,6 +30,7 @@ type Scheduler struct {
 	MinBackoff    time.Duration
 	MaxBackoff    time.Duration
 	InitialStagger bool
+	DisableInitialStagger bool
 	Metrics       *Metrics
 }
 
@@ -40,6 +41,7 @@ func (s Scheduler) defaults() Scheduler {
 	if s.MinBackoff <= 0 { s.MinBackoff = time.Second }
 	if s.MaxBackoff <= 0 { s.MaxBackoff = 30 * time.Second }
 	if s.MaxBackoff < s.MinBackoff { s.MaxBackoff = s.MinBackoff }
+	s.InitialStagger = !s.DisableInitialStagger
 	if s.Metrics == nil { s.Metrics = &Metrics{} }
 	return s
 }
