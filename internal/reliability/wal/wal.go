@@ -122,11 +122,33 @@ func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  return acked,e
 }
 func (w *WAL) Pending()([]Record,error){
- w.mu.Lock();defer w.mu.Unlock();acked,e:=w.ackState();if e!=nil{return nil,e}
- files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return nil,e};sort.Strings(files);var out []Record
- for _,p:=range files{var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg);if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
-  e=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e};if r.Seq<=w.manifest.CheckpointSeq{return nil};if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{out=append(out,r)};return nil});if e!=nil{return nil,e}
- };return out,nil
+ pending,e:=w.PendingWithAcks();if e!=nil{return nil,e}
+ records:=make([]Record,0,len(pending))
+ for _,p:=range pending{records=append(records,p.Record)}
+ return records,nil
+}
+
+// PendingWithAcks exposes independent sink state so a dispatcher can avoid
+// republishing to a destination that has already durably acknowledged an event.
+func (w *WAL) PendingWithAcks()([]PendingRecord,error){
+ w.mu.Lock();defer w.mu.Unlock()
+ if w.closed{return nil,os.ErrClosed}
+ acked,e:=w.ackState();if e!=nil{return nil,e}
+ files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return nil,e};sort.Strings(files)
+ var out []PendingRecord
+ for _,p:=range files{
+  var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
+  if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{
+   var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
+   if r.Seq<=w.manifest.CheckpointSeq{return nil}
+   mqtt:=acked["mqtt"][r.Seq];influx:=acked["influx"][r.Seq]
+   if !mqtt||!influx{out=append(out,PendingRecord{Record:r,MQTTAcked:mqtt,InfluxAcked:influx})}
+   return nil
+  })
+  if e!=nil{return nil,e}
+ }
+ return out,nil
 }
 func (w *WAL) Checkpoint(seq uint64)error{
  w.mu.Lock();defer w.mu.Unlock()
