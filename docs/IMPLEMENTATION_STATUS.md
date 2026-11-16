@@ -29,7 +29,11 @@ Repository: `https://github.com/likongshun/chat`
 - Graceful cancellation and client close support.
 
 ### Durability baseline
-- Existing WAL code is an early implementation scaffold only. Its reserve accounting is not a preallocated ACK reserve and it does not yet satisfy the agreed Data WAL + ACK WAL + Checkpoint + Manifest crash-consistency protocol.
+- The WAL format and crash-consistency contract are documented in `docs/WAL_FORMAT.md`.
+- Frame writes now handle short writes; frame readers reject invalid lengths/checksums; active data/ACK logs repair incomplete physical tails before append.
+- ACK validation checks the referenced sequence and exact event ID before persisting the ACK.
+- Linux opens preallocate a dedicated `ack.reserve` file with `fallocate`; ACK write/sync ENOSPC paths attempt to release the reserve and retry.
+- This remains an incremental hardening step, not completion of the approved segmented Data WAL + segmented ACK WAL + checkpoint snapshot + manifest commit protocol. The current WAL still uses the legacy data/ACK layout and old checkpoint/reclaim implementation.
 - Do not use the current WAL implementation as a production durability guarantee.
 
 ## Verification status
@@ -38,7 +42,7 @@ Source changes are committed to `main`. The current execution environment cannot
 
 ## Remaining work in sequence
 
-1. Stage 4: rebuild the WAL according to the approved crash-consistency sequence, including real preallocated ACK reserve, capacity protection, checkpoint/manifest recovery, and reclaim.
+1. Stage 4: finish the segmented Data WAL and ACK WAL, checkpoint snapshot, manifest commit/recovery, crash-safe reclaim, reserve replenishment, capacity watermarks, and fsync metrics; then add process-kill and disk-full fault tests.
 2. Add MQTT QoS 1 and InfluxDB adapters with independent durable ACKs and idempotent event identity.
 3. Add PostgreSQL configuration/version persistence, deployment assets, fault injection, and 5,000-device load tests.
 
