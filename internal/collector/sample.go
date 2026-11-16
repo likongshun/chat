@@ -11,12 +11,12 @@ const (
 )
 
 type Sample struct {
-	EventID   string
-	DeviceID  string
-	Model     string
-	PointCode string
-	Timestamp time.Time
-	Value     any
-	Quality   Quality
-	Error     string
+	EventID   string    `json:"event_id"`
+	DeviceID  string    `json:"device_id"`
+	Model     string    `json:"model"`
+	PointCode string    `json:"point_code"`
+	Timestamp time.Time `json:"timestamp"`
+	Value     any       `json:"value,omitempty"`
+	Quality   Quality   `json:"quality"`
+	Error     string    `json:"error,omitempty"`
 }
