@@ -2,12 +2,14 @@ package wal
 
 import (
  "encoding/json"
+ "errors"
  "fmt"
  "os"
  "path/filepath"
  "sort"
  "strings"
  "sync"
+ "syscall"
  "time"
 )
 
@@ -65,8 +67,20 @@ func (w *WAL) Ack(a Ack)error{
  if !found{return fmt.Errorf("ACK references unknown or checkpointed seq %d",a.Seq)}
  // An ACK is considered committed only after the log sync succeeds.
  b,e:=json.Marshal(a);if e!=nil{return e}
- if e=writeFrame(w.ack,b);e!=nil{return e}
- return w.ack.Sync()
+ ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
+ if e=writeFrame(w.ack,b);e!=nil{
+  if !errors.Is(e,syscall.ENOSPC){return e}
+  if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
+  if e=repairFrameTail(ackPath);e!=nil{return e}
+  if _,e=w.ack.Seek(0,os.SEEK_END);e!=nil{return e}
+  if e=writeFrame(w.ack,b);e!=nil{return e}
+ }
+ if e=w.ack.Sync();e!=nil{
+  if !errors.Is(e,syscall.ENOSPC){return e}
+  if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
+  if e=w.ack.Sync();e!=nil{return e}
+ }
+ return nil
 }
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{};e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if json.Unmarshal(b,&a)==nil{if acked[a.Sink]==nil{acked[a.Sink]=map[uint64]bool{}};acked[a.Sink][a.Seq]=true};return nil});return acked,e
