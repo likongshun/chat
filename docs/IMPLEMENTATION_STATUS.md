@@ -28,24 +28,41 @@ Repository: `https://github.com/likongshun/chat`
 - Modbus point poller maps batch responses back to configured point samples and preserves point-level quality/errors.
 - Graceful cancellation and client close support.
 
-### Durability baseline
-- The WAL format and crash-consistency contract are documented in `docs/WAL_FORMAT.md`.
-- Frame writes now handle short writes; frame readers reject invalid lengths/checksums; active data/ACK logs repair incomplete physical tails before append.
+### Stage 4 — durability (incomplete)
+- Frame writes handle short writes; frame readers reject invalid lengths/checksums; active data/ACK logs repair incomplete physical tails before append.
 - A reusable segmented log writer with deterministic segment naming, rotation, reopen, and directory sync is present with unit coverage; it is not yet wired into the main WAL/manifest lifecycle.
 - ACK validation checks the referenced sequence and exact event ID before persisting the ACK.
 - Linux opens preallocate a dedicated `ack.reserve` file with `fallocate`; ACK write/sync ENOSPC paths attempt to release the reserve and retry.
-- This remains an incremental hardening step, not completion of the approved segmented Data WAL + segmented ACK WAL + checkpoint snapshot + manifest commit protocol. The current WAL still uses the legacy data/ACK layout and old checkpoint/reclaim implementation.
+- The current WAL still uses the legacy data/ACK layout and old checkpoint/reclaim implementation.
+- The approved segmented Data WAL + segmented ACK WAL + checkpoint snapshot + manifest commit/recovery/reclaim protocol, reserve replenishment, capacity watermarks, unified fsync metrics, and disk-full/process-kill fault tests are not complete.
 - Do not use the current WAL implementation as a production durability guarantee.
+
+### Stage 4 — downstream pipeline (not integrated)
+- A minimal Sink/Dispatcher interface exists.
+- MQTT QoS 1 and InfluxDB adapters, independent durable ACK handling, and end-to-end replay are not implemented.
+- The current collector command loads Excel configuration and opens WAL, then waits for shutdown; it does not yet start the full polling and delivery pipeline.
+
+### Deployment foundation
+- Multi-stage Dockerfile builds a non-root collector image.
+- Docker Compose provisions collector, PostgreSQL 16, Mosquitto 2, and InfluxDB 2.7 with persistent volumes.
+- Compose is infrastructure scaffolding only: PostgreSQL/MQTT/InfluxDB are not yet wired into the Go application.
+- Mosquitto is configured for anonymous local development only; production authentication, ACLs, and TLS remain required.
+- See `docs/DOCKER_COMPOSE.md`.
 
 ## Verification status
 
-Source changes are committed to `main`. GitHub Actions initially failed before compilation because the repository had no `go.sum`; the workflows now run `go mod tidy` before verification. A new run is in progress for the latest commit. Therefore compilation, unit tests, race tests, device interoperability, crash recovery, and load tests are **not yet verified** until that run completes successfully.
+- GitHub Actions run `43957997176` for commit `7e51b40ce0cf3ea7641e905baae9bcc48cea2112` completed successfully: `go mod tidy`, `gofmt -w .`, `go vet ./...`, `go test ./...`, and the configured race-test packages all passed.
+- That successful run predates the Docker/Compose commits. The new Docker build and Compose configuration have not yet been verified by a subsequent CI run or by a live Docker host.
+- No physical Modbus device interoperability test, crash-recovery fault test, disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work in sequence
 
-1. Stage 4: finish the segmented Data WAL and ACK WAL, checkpoint snapshot, manifest commit/recovery, crash-safe reclaim, reserve replenishment, capacity watermarks, and fsync metrics; then add process-kill and disk-full fault tests.
+1. Finish segmented Data WAL and ACK WAL, checkpoint snapshot, manifest commit/recovery, crash-safe reclaim, reserve replenishment, capacity watermarks, and unified fsync metrics; add process-kill and disk-full fault tests.
 2. Add MQTT QoS 1 and InfluxDB adapters with independent durable ACKs and idempotent event identity.
-3. Add PostgreSQL configuration/version persistence, deployment assets, fault injection, and 5,000-device load tests.
+3. Connect the scheduler output to WAL and the durable downstream pipeline; add bounded backpressure and shutdown/replay behavior.
+4. Add PostgreSQL configuration/version persistence, validated Excel import, immutable snapshots, and safe hot reload.
+5. Add multi-instance device leases/sharding, health/metrics endpoints, security hardening, and production Compose profiles.
+6. Run integration tests, physical-device interoperability tests, fault injection, and 5,000-device load tests.
 
 ## Safety
 
