@@ -6,6 +6,7 @@ import (
  "os"
  "path/filepath"
  "testing"
+ "time"
 )
 func TestAppendAckCheckpointReopen(t *testing.T){
  d:=t.TempDir();w,e:=Open(Options{Dir:d,SegmentBytes:1024,MaxBytes:1<<20,ReserveBytes:4096,Sync:true});if e!=nil{t.Fatal(e)}
