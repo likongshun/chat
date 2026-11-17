@@ -195,10 +195,6 @@ func (w *WAL) Ack(a Ack)error{
  if w.closed||w.ack==nil{return os.ErrClosed}
  if a.Sink!="mqtt"&&a.Sink!="influx"{return fmt.Errorf("unsupported sink %q",a.Sink)}
  if a.Seq==0||a.EventID==""{return fmt.Errorf("ACK sequence and event_id are required")}
- // ACK retries are idempotent: avoid growing the append-only ACK log with
- // duplicate confirmations for the same sink and sequence.
- state,err:=w.ackState();if err!=nil{return err}
- if state[a.Sink][a.Seq]{return nil}
  found:=false
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e};sort.Strings(files)
  for _,p:=range files{
@@ -208,6 +204,10 @@ func (w *WAL) Ack(a Ack)error{
   if e!=nil{return e};if found{break}
  }
  if !found{return fmt.Errorf("ACK references unknown or checkpointed seq %d",a.Seq)}
+ // Validate the supplied identity against the retained Data WAL before the
+ // idempotent fast path. A duplicate sequence with a forged EventID must fail.
+ state,err:=w.ackState();if err!=nil{return err}
+ if state[a.Sink][a.Seq]{return nil}
  // An ACK is considered committed only after the log sync succeeds.
  b,e:=json.Marshal(a);if e!=nil{return e}
  ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
