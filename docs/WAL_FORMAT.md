@@ -90,6 +90,7 @@ A missing segment inside the manifest's required range is a recovery error. Recl
 ## Disk-full behavior currently implemented
 
 - Data admission enforces a configured WAL byte budget and reserves a separate logical capacity budget for ACK space.
+- On Linux, `statfs` filesystem usage and WAL budget usage produce warning/critical/stop levels at 70%/85%/95%; new Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available.
 - Linux preallocates `ack.reserve` using `fallocate`.
 - If reserve allocation returns ENOSPC during open, recovery is still allowed to proceed; ACK durability may remain unavailable until space is freed.
 - On ACK write/sync ENOSPC, the reserve file is released and the ACK operation is retried.
@@ -107,7 +108,6 @@ The following items are **not complete** and must not be assumed from the curren
 - Segmented ACK WAL and a checkpoint snapshot with explicit pending-record and per-sink ACK state.
 - Explicit checkpoint filename/reference fields and formal format migration tooling.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
-- Linux filesystem usage is sampled with statfs; WAL/filesystem pressure levels are warning at 70%, critical at 85%, and stop at 95%. New Data admission is stopped at the 95% boundary (or earlier at the configured WAL budget/reserve boundary), while ACK and reclaim paths remain available.
 - Process-kill fault injection at every checkpoint/manifest/unlink boundary.
 - Real disk-full and reserve-exhaustion tests.
 - Long-running soak tests and target-storage benchmarks.
