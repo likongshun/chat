@@ -114,7 +114,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  w.next+=uint64(len(records))
  st,e:=w.data.Stat();if e!=nil{return records,e}
  if st.Size()>=w.opts.SegmentBytes{
-  if e=w.rotate();e!=nil{return records,fmt.Errorf("records committed but segment rotation failed: %w",e)}
+  if e=w.rotate();e!=nil{w.failed=fmt.Errorf("segment rotation outcome is uncertain: %w",e);return records,fmt.Errorf("records committed but WAL entered fail-stop after rotation failure: %w",e)}
  }
  return records,nil
 }
