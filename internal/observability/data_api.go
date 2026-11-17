@@ -77,7 +77,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 		count:=0
 		var seen *time.Time
 		deviceLatest:=s.Latest.Snapshot(d.ID)
-		for _,p:=range cfg.Points { if p.Model==d.Model && p.Enabled { count++; if v,ok:=deviceLatest[p.PointCode];ok&&(seen==nil||v.Timestamp.After(*seen)){t:=v.Timestamp;seen=&t} } }
+		for _,p:=range cfg.Points { if p.Model==d.Model && p.Enabled { count++; if v,ok:=deviceLatest[p.PointCode];ok&&!v.LastSuccess.IsZero()&&(seen==nil||v.LastSuccess.After(*seen)){t:=v.LastSuccess;seen=&t} } }
 		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:count,LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
