@@ -43,6 +43,8 @@ func TestHealthReadinessAndPrometheusMetrics(t *testing.T) {
 		"modbus_wal_fsync_duration_seconds_bucket",
 		"modbus_wal_fsync_errors_total",
 		"modbus_wal_fsync_p99_seconds",
+		"modbus_wal_filesystem_used_ratio",
+		"modbus_wal_disk_level",
 		"modbus_delivery_published_total{sink=\"mqtt\"}",
 	} {
 		if !strings.Contains(body, metric) {
