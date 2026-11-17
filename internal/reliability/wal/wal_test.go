@@ -874,3 +874,19 @@ func TestMissingCommittedACKSegmentPreservesLegacyRecoveryCopy(t *testing.T) {
 		t.Fatalf("legacy recovery copy must be preserved on failed migration validation: %v", err)
 	}
 }
+
+
+func TestOpenFailsClosedWhenCommittedActiveDataSegmentIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	active := filepath.Join(dir, fmt.Sprintf("data-%020d.wal", w.manifest.ActiveSegment))
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	if err = os.Remove(active); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil {
+		t.Fatal("missing committed active Data segment must fail closed")
+	}
+	if _, err = os.Stat(active); !os.IsNotExist(err) {
+		t.Fatalf("Open must not silently recreate a missing committed Data segment, stat err=%v", err)
+	}
+}
