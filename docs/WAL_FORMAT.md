@@ -17,7 +17,6 @@ data/wal/
   ack-00000000000000000002.wal
   ack-00000000000000000003.wal.tmp
   ack.reserve
-  ack.reserve
 ```
 
 The current implementation uses Manifest-managed numbered Data WAL and ACK WAL segment files in the WAL directory. ACK segments use the same configured segment-size threshold as Data segments; reserve space remains a separately preallocated file.
