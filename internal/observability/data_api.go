@@ -164,19 +164,37 @@ func (s *Server) queryInflux(ctx context.Context,deviceID,pointCode string,from,
 	resp,err:=client.Do(req);if err!=nil{return nil,err};defer resp.Body.Close()
 	if resp.StatusCode<200||resp.StatusCode>=300 {_,_=io.Copy(io.Discard,io.LimitReader(resp.Body,4096));return nil,fmt.Errorf("InfluxDB returned %s",resp.Status)}
 	reader:=csv.NewReader(io.LimitReader(resp.Body,4<<20));reader.FieldsPerRecord=-1
-	var headers []string;out:=make([]telemetryView,0)
-	for { record,e:=reader.Read();if e==io.EOF{break};if e!=nil{return nil,e};if len(record)==0||strings.HasPrefix(record[0],"#"){continue}
+	var headers []string
+	var dataTypes []string
+	out:=make([]telemetryView,0)
+	for { record,e:=reader.Read();if e==io.EOF{break};if e!=nil{return nil,e};if len(record)==0{continue}
+		if record[0]=="#datatype" { dataTypes=record;continue }
+		if strings.HasPrefix(record[0],"#"){continue}
 		if headers==nil {headers=record;continue}
 		row:=map[string]string{};for i,v:=range record{if i<len(headers){row[headers[i]]=v}}
 		ts,parseErr:=time.Parse(time.RFC3339Nano,row["_time"]);if parseErr!=nil{continue}
-		value:=parseInfluxValue(row["_value"])
+		valueType:=""
+		for i,name:=range headers { if name=="_value"&&i<len(dataTypes) {valueType=dataTypes[i];break} }
+		value:=parseInfluxValue(row["_value"],valueType)
 		out=append(out,telemetryView{DeviceID:deviceID,PointCode:pointCode,Timestamp:ts,Value:value,Quality:row["quality"]})
 		if len(out)>=limit{break}
 	}
 	return out,nil
 }
 
-func parseInfluxValue(raw string) any {
+func parseInfluxValue(raw, dataType string) any {
+	switch dataType {
+	case "long":
+		if v,e:=strconv.ParseInt(raw,10,64);e==nil{return v}
+	case "unsignedLong":
+		if v,e:=strconv.ParseUint(raw,10,64);e==nil{return v}
+	case "double":
+		if v,e:=strconv.ParseFloat(raw,64);e==nil&&!math.IsNaN(v)&&!math.IsInf(v,0){return v}
+	case "boolean":
+		if v,e:=strconv.ParseBool(raw);e==nil{return v}
+	case "string":
+		return raw
+	}
 	if v,e:=strconv.ParseFloat(raw,64);e==nil&&!math.IsNaN(v)&&!math.IsInf(v,0){return v}
 	if v,e:=strconv.ParseBool(raw);e==nil{return v}
 	return raw
