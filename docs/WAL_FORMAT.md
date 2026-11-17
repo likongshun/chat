@@ -106,9 +106,6 @@ All WAL file and directory sync paths use one instrumented sync wrapper. It expo
 
 The following items are **not complete** and must not be assumed from the current implementation:
 
-- Manifest v4-managed numbered ACK segments. ACK rotation creates and syncs the next segment and its directory entry before committing `ack_active_segment`; old segments remain in the manifest range until checkpoint compaction.
-- ACK compaction writes all ACK records above the committed checkpoint boundary into a new segment, syncs the file and directory, then first extends the manifest range to include the new active segment. After switching the append handle, a second manifest commit advances the first ACK segment boundary. Only then are old ACK segments unlinked and the directory synced. If either manifest commit has an uncertain outcome, the old and new active segments remain covered by at least one possible committed range, so subsequent ACK appends are not lost.
-- Legacy `ack.wal` migration copies and syncs its bytes into ACK segment 1, commits the Manifest v4 reference, then removes the legacy file. Recovery fails closed if any committed ACK segment is missing and removes uncommitted ACK segment orphans.
 - A complete checkpoint snapshot with explicit pending-record and per-sink ACK state remains outstanding.
 - Explicit checkpoint filename/reference fields and formal format migration tooling.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
