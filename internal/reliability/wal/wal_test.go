@@ -1451,7 +1451,7 @@ func TestWALBacklogSnapshotRecoveryStress(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, SegmentBytes: 32 << 10, MaxBytes: 64 << 20, ReserveBytes: 1 << 20, Sync: true})
 	if err != nil { t.Fatal(err) }
-	const total = 3000
+	const total = 10000
 	for start := 0; start < total; start += 100 {
 		batch := make([]AppendInput, 0, 100)
 		for i := start; i < start+100; i++ {
