@@ -69,18 +69,20 @@ Remaining WAL/delivery gaps:
 
 ## Verification
 
-- Commit `5e7b5d52be2f1b6ea21afbe2e2f3637c9b31bbb7` passed Go unit tests, `go vet`, race tests across all Go packages, Compose config validation, and Docker image build. This was before the newest delivery integration changes.
-- The newest MQTT/Influx, delivery worker, WAL checkpoint and processing changes have separate GitHub Actions runs in progress; their success must be checked before release.
-- Unit tests cover WAL locking, ACK identity, torn-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity and gap rejection, safe segment rotation, partial reclaim cleanup, missing-segment fail-closed behavior, per-sink ACK state, batch append, delivery retry, Influx line protocol, processing operators, and scheduler-to-WAL persistence.
+- Commit `43f9c31d3578da456036bc9018d5cf557a959a4c` passed Go formatting, `go vet`, unit tests, race tests, Docker Compose validation, collector image build, and PostgreSQL/MQTT/InfluxDB integration tests (GitHub Actions run `44016264596`).
+- Commit `b798185f81f01abd7d702c7943d2320aa8fa151b` passed the same CI suite after adding explicit checkpoint-reference and Reclaim coverage (run `44015889194`).
+- Commit `d422391444e051dd9e55498a3dac1c53a287fd92` passed the same suite with concurrent ACK writes and ACK reserve replenishment coverage (run `44016094424`).
+- Unit tests cover WAL locking, ACK identity and idempotency, legacy ACK migration, ACK segment rotation and two-phase compaction, compaction manifest-failure recovery, checkpoint checksums and explicit references, path traversal rejection, torn-tail recovery, Data/ACK orphan cleanup, missing committed segment fail-closed behavior, sequence continuity, and per-sink delivery state.
+- The newest Data-orphan recovery and checkpoint migration additions have their own CI runs; verify their final conclusions before release.
 - No physical Modbus device test, full process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work
 
-1. Finish WAL migration validation, complete process-kill crash and real disk-full/reserve-exhaustion fault tests, and long-running storage benchmarks.
-2. Add PostgreSQL configuration/version storage, Excel import transactions, immutable snapshots, and safe hot reload.
+1. Complete the pending-record checkpoint snapshot design, process-kill crash matrix, real disk-full/reserve-exhaustion tests, and long-running storage benchmarks.
+2. Implement automatic configuration hot reload and an administrative import/activation API.
 3. Add device leases/sharding for multi-instance collection.
-4. Expand Prometheus fsync/capacity metrics, structured logs, production Compose profile, MQTT authentication/TLS and Docker secrets.
-5. Run broker/Influx integration tests, physical device interoperability, fault injection, and 5,000-device load tests.
+4. Expand structured logs and production Compose hardening; configure MQTT authentication, ACL/TLS, and Docker secrets.
+5. Run physical-device interoperability, production-filesystem fault tests, and 5,000-device load tests.
 
 ## Safety
 
