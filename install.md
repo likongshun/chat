@@ -174,7 +174,7 @@ INFLUXDB_ADMIN_TOKEN=替换为足够长的随机令牌
 | `POLL_WORKERS` | `500` | 全局采集并发上限 |
 | `POLL_TIMEOUT` | `800ms` | 单次设备采集超时 |
 | `SCHEDULER_OUTPUT_BUFFER` | `10000` | 采集结果缓冲容量 |
-| `LATEST_CACHE_MAX_POINTS` | `100000` | 最新点位缓存容量上限；按设备数×点数及内存预算调整 |
+| `LATEST_CACHE_MAX_POINTS` | `1500000` | 最新点位缓存容量上限；按设备数×点数及内存预算调整 |
 | `WAL_SEGMENT_BYTES` | `67108864` | WAL 分段阈值，单位字节 |
 | `MAX_WAL_BYTES` | `10737418240` | WAL 数据容量预算，单位字节 |
 | `ACK_RESERVE_BYTES` | `67108864` | ACK 紧急预留空间，单位字节 |
