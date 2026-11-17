@@ -28,6 +28,10 @@ type Stats struct {
  DiskBytes int64
  MaxBytes int64
  DiskUsedRatio float64
+ FilesystemBytes uint64
+ FilesystemTotalBytes uint64
+ FilesystemUsedRatio float64
+ DiskLevel string
  PendingRecords int
  CapacityRejections uint64
  AdmissionLimitBytes int64
