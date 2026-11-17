@@ -297,7 +297,6 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 		w.manifest.AckFirstSegment = oldFirst
 		return fmt.Errorf("commit compacted ACK lower boundary: %w", err)
 	}
-	if err = w.saveManifest(); err != nil { w.manifest.AckFirstSegment = oldFirst; return fmt.Errorf("commit compacted ACK lower boundary: %w", err) }
 	w.crashPoint("ack.compact.manifest.narrowed")
 	if err = w.cleanupObsoleteAckSegments(); err != nil { return err }
 	w.crashPoint("ack.compact.obsolete.deleted")
