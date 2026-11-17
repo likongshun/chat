@@ -2,6 +2,7 @@ package wal
 
 import (
  "encoding/json"
+ "fmt"
  "errors"
  "os"
  "path/filepath"
