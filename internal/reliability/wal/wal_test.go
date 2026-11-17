@@ -1125,3 +1125,87 @@ func TestOpenAdoptsLegacyNonEmptyDataAndACKWithoutManifest(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if record.Seq != 2 { t.Fatalf("next sequence=%d, want 2", record.Seq) }
 }
+
+
+func TestCheckpointSnapshotPreservesPendingAndIndependentACKState(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	records := make([]Record, 0, 3)
+	for i := 0; i < 3; i++ {
+		record, appendErr := w.Append(fmt.Sprintf("snapshot-%d", i+1), json.RawMessage(fmt.Sprintf(`{"n":%d}`, i+1)))
+		if appendErr != nil { t.Fatal(appendErr) }
+		records = append(records, record)
+	}
+	if err = w.Ack(Ack{Seq: records[0].Seq, Sink: "mqtt", EventID: records[0].EventID}); err != nil { t.Fatal(err) }
+
+	if target, checkpointErr := w.CheckpointReady(); checkpointErr != nil || target != 0 {
+		t.Fatalf("pending prefix checkpoint target=%d err=%v", target, checkpointErr)
+	}
+	if w.manifest.Version != 6 || w.manifest.CheckpointFile == "" || w.manifest.CheckpointSeq != 0 {
+		t.Fatalf("expected v6 pending snapshot at zero prefix: %+v", w.manifest)
+	}
+	firstFile := w.manifest.CheckpointFile
+	pending, err := w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 3 || !pending[0].MQTTAcked || pending[0].InfluxAcked || pending[1].MQTTAcked || pending[1].InfluxAcked {
+		t.Fatalf("incorrect initial pending ACK snapshot: %+v", pending)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	w, err = Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen pending snapshot: %v", err) }
+	if pending, err = w.PendingWithAcks(); err != nil { t.Fatal(err) }
+	if len(pending) != 3 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+		t.Fatalf("per-sink state did not survive reopen: %+v", pending)
+	}
+
+	if err = w.Ack(Ack{Seq: records[0].Seq, Sink: "influx", EventID: records[0].EventID}); err != nil { t.Fatal(err) }
+	if target, checkpointErr := w.CheckpointReady(); checkpointErr != nil || target != 1 {
+		t.Fatalf("advance acknowledged prefix target=%d err=%v", target, checkpointErr)
+	}
+	if w.manifest.CheckpointSeq != 1 { t.Fatalf("checkpoint prefix=%d, want 1", w.manifest.CheckpointSeq) }
+	if w.manifest.CheckpointFile == firstFile { t.Fatal("checkpoint generation did not advance") }
+	pending, err = w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 2 || pending[0].Seq != 2 || pending[1].Seq != 3 {
+		t.Fatalf("pending records not preserved after prefix advancement: %+v", pending)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	w, err = Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen advanced checkpoint: %v", err) }
+	defer w.Close()
+	pending, err = w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 2 || pending[0].Seq != 2 || pending[1].Seq != 3 {
+		t.Fatalf("pending snapshot did not survive second reopen: %+v", pending)
+	}
+}
+
+func TestCheckpointSnapshotRejectsDataMismatch(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("snapshot-integrity", json.RawMessage(`{"value":1}`))
+	if err != nil { t.Fatal(err) }
+	if _, err = w.CheckpointReady(); err != nil { t.Fatal(err) }
+	checkpointFile := filepath.Join(dir, w.manifest.CheckpointFile)
+	raw, err := os.ReadFile(checkpointFile)
+	if err != nil { t.Fatal(err) }
+	var snapshot Checkpoint
+	if err = json.Unmarshal(raw, &snapshot); err != nil { t.Fatal(err) }
+	snapshot.Pending[0].Payload = json.RawMessage(`{"value":2}`)
+	raw, err = json.Marshal(snapshot)
+	if err != nil { t.Fatal(err) }
+	if err = atomicFile(checkpointFile, raw); err != nil { t.Fatal(err) }
+	// Rebind the checksum to ensure recovery detects semantic mismatch, not only a bad digest.
+	sum := sha256.Sum256(raw)
+	w.manifest.CheckpointChecksum = hex.EncodeToString(sum[:])
+	if err = w.saveManifest(); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil {
+		t.Fatal("recovery must reject a checkpoint payload that differs from the retained Data WAL")
+	}
+	_ = record
+}
