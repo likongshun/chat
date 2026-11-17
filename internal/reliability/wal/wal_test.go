@@ -1612,3 +1612,35 @@ func TestWALProcessKillCleansUncommittedMetadataTemps(t *testing.T) {
 		}
 	})
 }
+
+
+func TestCheckpointReadyRetriesACKCompactionAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("retry-compaction", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	oldActive := w.manifest.AckActiveSegment
+	w.manifestCommitHook = func(next Manifest) error {
+		if next.AckActiveSegment > oldActive { return errors.New("injected ACK compaction manifest failure") }
+		return nil
+	}
+	if err = w.Checkpoint(record.Seq); err == nil {
+		t.Fatal("expected ACK compaction failure after checkpoint commit")
+	}
+	if w.manifest.CheckpointSeq != record.Seq {
+		t.Fatalf("checkpoint should remain committed when ACK compaction fails: %+v", w.manifest)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen after interrupted compaction: %v", err) }
+	defer w.Close()
+	if _, err = w.CheckpointReady(); err != nil { t.Fatalf("CheckpointReady did not retry ACK compaction: %v", err) }
+	if w.manifest.AckFirstSegment != w.manifest.AckActiveSegment {
+		t.Fatalf("ACK compaction lower boundary was not advanced on retry: %+v", w.manifest)
+	}
+}
