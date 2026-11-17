@@ -40,6 +40,10 @@ jobs:
         run: docker build --tag modbus-collector:ci .
       - name: Build dashboard container image
         run: docker build --tag modbus-dashboard:ci ./web
+      - name: Validate dashboard JavaScript syntax
+        run: node --check web/assets/app.js
+      - name: Validate dashboard Nginx configuration
+        run: docker run --rm --entrypoint nginx modbus-dashboard:ci -t
       - name: Prepare bounded ext4 filesystem for real WAL ENOSPC test
         run: |
           sudo truncate -s 128M /tmp/modbus-wal-fs.img
