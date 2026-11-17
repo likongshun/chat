@@ -96,6 +96,10 @@ A missing segment inside the manifest's required range is a recovery error. Recl
 - The reserve is attempted again on the next process open; automatic reserve replenishment and filesystem-wide watermarks are not yet implemented.
 - A failed ACK is never reported as durable and cannot authorize checkpointing.
 
+## fsync telemetry
+
+All WAL file and directory sync paths use one instrumented sync wrapper. It exposes a Prometheus histogram (`modbus_wal_fsync_duration_seconds`), error counter (`modbus_wal_fsync_errors_total`), and approximate P99 gauge (`modbus_wal_fsync_p99_seconds`). The histogram buckets are 1, 5, 10, 25, 50, 100, 250, and 1,000 ms plus +Inf. Metrics are process-wide and cumulative; validate bucket thresholds against the target storage before setting alerts.
+
 ## Remaining production-hardening work
 
 The following items are **not complete** and must not be assumed from the current implementation:
@@ -104,7 +108,8 @@ The following items are **not complete** and must not be assumed from the curren
 - Manifest checksum, explicit checkpoint filename/checksum, and format migration tooling.
 - Automatic ACK reserve replenishment and tested disk-full behavior on the target filesystem.
 - Filesystem usage watermarks (warning/critical/stop) and capacity health metrics.
-- Unified fsync instrumentation for Data, ACK, checkpoint, manifest, and directory sync paths.
+- Process-kill fault injection at every checkpoint/manifest/unlink boundary.
+- Real disk-full and reserve-exhaustion tests.
 - Process-kill fault injection at every checkpoint/manifest/unlink boundary.
 - Real disk-full and reserve-exhaustion tests.
 - Long-running soak tests and target-storage benchmarks.
