@@ -9,6 +9,7 @@ import (
  "path/filepath"
  "strings"
  "sync"
+ "syscall"
  "testing"
  "time"
 )
@@ -1361,4 +1362,84 @@ func TestWALProcessKillACKCompactionAndReclaimBoundaries(t *testing.T) {
 			t.Fatalf("recovery did not finish committed Data segment deletion: %v", err)
 		}
 	})
+}
+
+
+func TestACKWriteENOSPCReleasesReserveRepairsTailAndRetries(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1 << 20, MaxBytes: 8 << 20, ReserveBytes: 64 << 10, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	record, err := w.Append("ack-enospc-write", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	calls := 0
+	w.ackWriteHook = func(file *os.File, payload []byte) error {
+		calls++
+		if calls == 1 {
+			if _, writeErr := file.Write([]byte{0, 0}); writeErr != nil { return writeErr }
+			return syscall.ENOSPC
+		}
+		return writeFrame(file, payload)
+	}
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); err != nil { t.Fatalf("ACK should succeed after reserve release: %v", err) }
+	if calls != 2 { t.Fatalf("ACK write attempts=%d, want 2", calls) }
+	if _, err = os.Stat(filepath.Join(dir, "ack.reserve")); !os.IsNotExist(err) { t.Fatalf("reserve should be released after ENOSPC: %v", err) }
+	state, err := w.ackState()
+	if err != nil { t.Fatal(err) }
+	if !state["mqtt"][record.Seq] { t.Fatal("ACK was not durable after retry") }
+}
+
+func TestACKSyncENOSPCReleasesReserveAndRetriesSync(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 64 << 10, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	record, err := w.Append("ack-enospc-sync", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	calls := 0
+	w.ackSyncHook = func(file *os.File) error {
+		calls++
+		if calls == 1 { return syscall.ENOSPC }
+		return syncFile(file)
+	}
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "influx", EventID: record.EventID}); err != nil { t.Fatalf("ACK should succeed after reserve release: %v", err) }
+	if calls != 2 { t.Fatalf("ACK sync attempts=%d, want 2", calls) }
+	state, err := w.ackState()
+	if err != nil { t.Fatal(err) }
+	if !state["influx"][record.Seq] { t.Fatal("ACK was not durable after sync retry") }
+}
+
+func TestACKReserveExhaustionNeverReportsSuccess(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 64 << 10, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	record, err := w.Append("ack-reserve-exhausted", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	attempts := 0
+	w.ackWriteHook = func(_ *os.File, _ []byte) error { attempts++; return syscall.ENOSPC }
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("ACK must report reserve exhaustion, got %v", err)
+	}
+	if attempts != 2 { t.Fatalf("ACK write attempts=%d, want 2", attempts) }
+	state, err := w.ackState()
+	if err != nil { t.Fatal(err) }
+	if state["mqtt"][record.Seq] { t.Fatal("failed ACK was incorrectly marked durable") }
+}
+
+func TestACKReserveReleaseFailureNeverReportsSuccess(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	record, err := w.Append("ack-reserve-release-failure", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	w.ackWriteHook = func(_ *os.File, _ []byte) error { return syscall.ENOSPC }
+	w.reserveReleaseHook = func(string) error { return errors.New("simulated reserve release failure") }
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "influx", EventID: record.EventID}); err == nil {
+		t.Fatal("ACK must fail if emergency reserve cannot be released")
+	}
+	state, err := w.ackState()
+	if err != nil { t.Fatal(err) }
+	if state["influx"][record.Seq] { t.Fatal("failed ACK was incorrectly marked durable") }
 }
