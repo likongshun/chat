@@ -98,7 +98,7 @@ A missing segment inside the manifest's required range is a recovery error. Recl
 - Linux preallocates `ack.reserve` using `fallocate`; reserve growth is prepared in a temporary file, synced, atomically renamed, and followed by a directory sync so the previous reserve remains intact until replacement is ready.
 - If reserve allocation returns ENOSPC during open, recovery is still allowed to proceed; ACK durability may remain unavailable until space is freed.
 - On ACK write/sync ENOSPC, the reserve file is released and the ACK operation is retried.
-- The reserve is attempted again on the next process open; automatic reserve replenishment and filesystem-wide watermarks are not yet implemented.
+- After checkpoint compaction and reclaim, `CheckpointReady()` atomically attempts to replenish the reserve; if space is still insufficient it returns an explicit error while preserving the already committed checkpoint/reclaim result, and a later cycle retries. The 70%/85%/95% filesystem and WAL-budget watermarks are implemented; production alert thresholds still require target-storage validation.
 - A failed ACK is never reported as durable and cannot authorize checkpointing.
 
 ## fsync telemetry
@@ -112,8 +112,8 @@ The following items are **not complete** and must not be assumed from the curren
 - Process-kill fault injection and real disk-full/reserve-exhaustion tests must pass on the target filesystem before production durability can be claimed.
 - Formal, operator-facing format migration tooling and a complete pending-record checkpoint snapshot.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
-- Expand subprocess crash injection to every checkpoint/manifest/ACK rotation/unlink boundary and run it on the production filesystem.
-- Real disk-full and reserve-exhaustion tests.
-- Long-running soak tests and target-storage benchmarks.
+- Expand subprocess crash injection to all remaining filesystem operation boundaries and run the crash matrix on the production filesystem.
+- Production-filesystem-specific disk-full, quota, inode exhaustion, and reserve sizing tests.
+- Multi-hour soak tests and target-storage benchmarks at realistic 5,000-device event rates.
 
 The current WAL has unit tests for locking, ACK validation, torn-tail repair, checkpoint ordering, sequence continuity after reclaim, partial deletion recovery, and independent sink ACK state. These tests do not replace process-kill fault injection or production filesystem testing.
