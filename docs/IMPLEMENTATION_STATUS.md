@@ -28,7 +28,8 @@ Repository: `https://github.com/likongshun/chat`
 ### Stage 4 — WAL and downstream delivery (integrated foundation; not production complete)
 - Exclusive Linux process lock held for WAL lifetime.
 - Framed Data WAL with CRC32, short-write handling, strict frame validation, active-tail repair before recovery.
-- Segmented Data WAL rotation with manifest-managed active/first segment boundaries.
+- Segmented Data WAL rotation with manifest-managed active/first segment boundaries; the next segment file and directory entry are synced before MANIFEST can point to it, so a pre-commit crash leaves only an ignorable orphan.
+- Recovery rejects duplicate or missing post-checkpoint sequence numbers; checkpoint advancement independently verifies a contiguous acknowledged prefix and refuses to jump over missing records.
 - Independent MQTT and Influx ACK records; strict sink/sequence/event-ID validation and recovery-time ACK-to-data identity checks.
 - `PendingWithAcks()` exposes independent sink state for replay.
 - Immutable sequence-specific checkpoints; only a fully acknowledged sequence prefix is checkpointed, with MANIFEST as commit point.
@@ -70,7 +71,7 @@ Remaining WAL/delivery gaps:
 
 - Commit `5e7b5d52be2f1b6ea21afbe2e2f3637c9b31bbb7` passed Go unit tests, `go vet`, race tests across all Go packages, Compose config validation, and Docker image build. This was before the newest delivery integration changes.
 - The newest MQTT/Influx, delivery worker, WAL checkpoint and processing changes have separate GitHub Actions runs in progress; their success must be checked before release.
-- Unit tests cover WAL locking, ACK identity, torn-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity, partial reclaim cleanup, missing-segment fail-closed behavior, per-sink ACK state, batch append, delivery retry, Influx line protocol, processing operators, and scheduler-to-WAL persistence.
+- Unit tests cover WAL locking, ACK identity, torn-tail recovery, checkpoint generation isolation, ACK compaction, sequence continuity and gap rejection, safe segment rotation, partial reclaim cleanup, missing-segment fail-closed behavior, per-sink ACK state, batch append, delivery retry, Influx line protocol, processing operators, and scheduler-to-WAL persistence.
 - No physical Modbus device test, full process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
 
 ## Remaining work
