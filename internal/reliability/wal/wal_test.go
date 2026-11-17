@@ -760,3 +760,58 @@ func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if !state["mqtt"][1] { t.Fatalf("legacy ACK was not migrated: %+v", state) }
 }
+
+
+func TestACKSegmentCompactionCommitsBoundaryBeforeDeletingOldSegments(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("ack-compact", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	oldFirst, oldActive := w.manifest.AckFirstSegment, w.manifest.AckActiveSegment
+	if oldActive <= oldFirst { t.Fatalf("expected multiple ACK segments before compaction: %+v", w.manifest) }
+	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
+	if w.manifest.AckFirstSegment != w.manifest.AckActiveSegment || w.manifest.AckActiveSegment <= oldActive {
+		t.Fatalf("compaction did not publish a fresh ACK segment: %+v", w.manifest)
+	}
+	for id := oldFirst; id <= oldActive; id++ {
+		if _, err = os.Stat(ackSegmentPath(dir, id)); !os.IsNotExist(err) {
+			t.Fatalf("obsolete ACK segment %d remains after committed compaction, stat err=%v", id, err)
+		}
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen after ACK compaction: %v", err) }
+	defer reopened.Close()
+	if reopened.manifest.CheckpointSeq != record.Seq { t.Fatalf("checkpoint sequence=%d, want %d", reopened.manifest.CheckpointSeq, record.Seq) }
+}
+
+func TestRecoveryRemovesUncommittedACKSegmentOrphan(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	orphanID := w.manifest.AckActiveSegment + 1
+	if err = os.WriteFile(ackSegmentPath(dir, orphanID), []byte("uncommitted orphan"), 0600); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer reopened.Close()
+	if _, err = os.Stat(ackSegmentPath(dir, orphanID)); !os.IsNotExist(err) {
+		t.Fatalf("uncommitted ACK segment orphan was not removed, stat err=%v", err)
+	}
+}
+
+func TestOpenFailsClosedWhenCommittedACKSegmentIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	active := ackSegmentPath(dir, w.manifest.AckActiveSegment)
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	if err = os.Remove(active); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil {
+		t.Fatal("missing committed ACK segment must fail closed")
+	}
+}
