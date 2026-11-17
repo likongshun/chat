@@ -18,7 +18,7 @@ import (
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; manifestExists bool; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error; faultHook func(string) }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; manifestExists bool; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error; faultHook func(string); ackWriteHook func(*os.File, []byte) error; ackSyncHook func(*os.File) error; reserveReleaseHook func(string) error }
 func (w *WAL) crashPoint(name string) { if w.faultHook != nil { w.faultHook(name) } }
 
 func Open(o Options)(*WAL,error){
@@ -278,6 +278,19 @@ func (w *WAL) rotate() error {
 	return nil
 }
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
+func (w *WAL) writeACKFrame(payload []byte) error {
+	if w.ackWriteHook != nil { return w.ackWriteHook(w.ack, payload) }
+	return writeFrame(w.ack, payload)
+}
+func (w *WAL) syncACK() error {
+	if w.ackSyncHook != nil { return w.ackSyncHook(w.ack) }
+	return syncFile(w.ack)
+}
+func (w *WAL) releaseACKReserve() error {
+	if w.reserveReleaseHook != nil { return w.reserveReleaseHook(w.opts.Dir) }
+	return releaseAckReserve(w.opts.Dir)
+}
+
 func (w *WAL) Ack(a Ack)error{
  w.mu.Lock();defer w.mu.Unlock()
  if w.closed||w.ack==nil{return os.ErrClosed}
@@ -306,14 +319,14 @@ func (w *WAL) Ack(a Ack)error{
   }
  }
  ackPath:=ackSegmentPath(w.opts.Dir,w.manifest.AckActiveSegment)
- if e=writeFrame(w.ack,b);e!=nil{
+ if e=w.writeACKFrame(b);e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
-  if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
+  if e=w.releaseACKReserve();e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
   if e=repairFrameTail(ackPath);e!=nil{return e}
   if _,e=w.ack.Seek(0,io.SeekEnd);e!=nil{return e}
   if e=writeFrame(w.ack,b);e!=nil{return e}
  }
- if e=syncFile(w.ack);e!=nil{
+ if e=w.syncACK();e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
   if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
   if e=syncFile(w.ack);e!=nil{return e}
