@@ -502,7 +502,7 @@ func (w *WAL) Stats()(Stats,error){
  stats:=Stats{
   DiskBytes:usage,MaxBytes:w.opts.MaxBytes,
   FilesystemBytes:fsUsed,FilesystemTotalBytes:fsTotal,
-  PendingRecords:len(pending),SegmentCount:len(ids),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.admissionLimitBytes(),
+  PendingRecords:len(pending),SegmentCount:len(ids),AckSegmentCount:int(w.manifest.AckActiveSegment-w.manifest.AckFirstSegment+1),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.admissionLimitBytes(),
   CheckpointSeq:w.manifest.CheckpointSeq,
   FirstSegment:w.manifest.FirstSegment,ActiveSegment:w.manifest.ActiveSegment,
   Fsync:snapshotFsyncMetrics(),
