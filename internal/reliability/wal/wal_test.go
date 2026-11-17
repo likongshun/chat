@@ -733,7 +733,7 @@ func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	if err = writeFrame(dataFile, dataRaw); err != nil { t.Fatal(err) }
 	if err = syncFile(dataFile); err != nil { t.Fatal(err) }
 	if err = dataFile.Close(); err != nil { t.Fatal(err) }
-	legacy := ackSegmentPath(dir, w.manifest.AckActiveSegment)
+	legacy := filepath.Join(dir, "ack.wal")
 	f, err := os.Create(legacy)
 	if err != nil { t.Fatal(err) }
 	if err = writeFrame(f, []byte(`{"seq":1,"sink":"mqtt","event_id":"legacy"}`)); err != nil { t.Fatal(err) }
