@@ -87,8 +87,9 @@ func (r *Repository) Import(ctx context.Context, cfg config.Config, source strin
 	if err != nil {
 		return 0, fmt.Errorf("marshal configuration snapshot: %w", err)
 	}
-	sum := sha256.Sum256(snapshot)
-	checksum := hex.EncodeToString(sum[:])
+	// PostgreSQL JSONB stores a normalized representation. Hash the exact
+	// JSONB text returned by PostgreSQL so verification is stable after reload.
+	checksum := "pending"
 	if source == "" {
 		source = "api"
 	}
@@ -99,11 +100,17 @@ func (r *Repository) Import(ctx context.Context, cfg config.Config, source strin
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var versionID int64
+	var storedSnapshot []byte
 	if err := tx.QueryRow(ctx,
-		"INSERT INTO modbus_config_versions (checksum, source, snapshot) VALUES ($1, $2, $3) RETURNING id",
+		"INSERT INTO modbus_config_versions (checksum, source, snapshot) VALUES ($1, $2, $3) RETURNING id, snapshot::text",
 		checksum, source, string(snapshot),
-	).Scan(&versionID); err != nil {
+	).Scan(&versionID, &storedSnapshot); err != nil {
 		return 0, fmt.Errorf("insert configuration version: %w", err)
+	}
+	sum := sha256.Sum256(storedSnapshot)
+	checksum = hex.EncodeToString(sum[:])
+	if _, err := tx.Exec(ctx, "UPDATE modbus_config_versions SET checksum = $1 WHERE id = $2", checksum, versionID); err != nil {
+		return 0, fmt.Errorf("store normalized configuration checksum: %w", err)
 	}
 	activateSQL := "INSERT INTO modbus_config_active (singleton, version_id) VALUES (TRUE, $1) " +
 		"ON CONFLICT (singleton) DO UPDATE SET version_id = EXCLUDED.version_id, updated_at = NOW()"
@@ -120,7 +127,7 @@ func (r *Repository) LoadActive(ctx context.Context) (config.Config, int64, erro
 	var versionID int64
 	var checksum string
 	var snapshot []byte
-	query := "SELECT v.id, v.checksum, v.snapshot FROM modbus_config_active a " +
+	query := "SELECT v.id, v.checksum, v.snapshot::text FROM modbus_config_active a " +
 		"JOIN modbus_config_versions v ON v.id = a.version_id WHERE a.singleton = TRUE"
 	err := r.pool.QueryRow(ctx, query).Scan(&versionID, &checksum, &snapshot)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -147,7 +154,7 @@ func (r *Repository) Activate(ctx context.Context, versionID int64) error {
 	var checksum string
 	var snapshot []byte
 	if err := r.pool.QueryRow(ctx,
-		"SELECT checksum, snapshot FROM modbus_config_versions WHERE id = $1", versionID,
+		"SELECT checksum, snapshot::text FROM modbus_config_versions WHERE id = $1", versionID,
 	).Scan(&checksum, &snapshot); err != nil {
 		return fmt.Errorf("load configuration version %d: %w", versionID, err)
 	}
