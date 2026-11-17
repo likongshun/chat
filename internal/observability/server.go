@@ -119,6 +119,8 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "modbus_wal_oldest_pending_age_seconds %f\n", stats.OldestPendingAge.Seconds())
 			fmt.Fprintln(w, "# TYPE modbus_wal_segments gauge")
 			fmt.Fprintf(w, "modbus_wal_segments %d\n", stats.SegmentCount)
+			fmt.Fprintln(w, "# TYPE modbus_wal_ack_segments gauge")
+			fmt.Fprintf(w, "modbus_wal_ack_segments %d\n", stats.AckSegmentCount)
 			fmt.Fprintln(w, "# TYPE modbus_wal_checkpoint_sequence gauge")
 			fmt.Fprintf(w, "modbus_wal_checkpoint_sequence %d\n", stats.CheckpointSeq)
 			fmt.Fprintln(w, "# TYPE modbus_wal_fsync_duration_seconds histogram")
