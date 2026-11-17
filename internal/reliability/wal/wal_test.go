@@ -495,6 +495,32 @@ func TestManifestRejectsTamperedCheckpointPayload(t *testing.T) {
 	}
 }
 
+
+func TestManifestV2UpgradesToV3OnCommit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
+	legacy := Manifest{Version: 2, FirstSegment: 1, ActiveSegment: 1}
+	legacy.Checksum, _ = manifestChecksum(legacy)
+	raw, err := json.Marshal(legacy)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(filepath.Join(dir, "MANIFEST"), raw, 0600); err != nil { t.Fatal(err) }
+
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("load v2 manifest: %v", err) }
+	if _, err = w.Append("v2-upgrade", json.RawMessage(`{"v":1}`)); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	raw, err = os.ReadFile(filepath.Join(dir, "MANIFEST"))
+	if err != nil { t.Fatal(err) }
+	var upgraded Manifest
+	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
+	if upgraded.Version != 3 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen v3 manifest: %v", err) }
+	if err = reopened.Close(); err != nil { t.Fatal(err) }
+}
+
 func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
