@@ -29,6 +29,7 @@ func (w *WAL) prepareInitialDataSegment() error {
 	}
 	if err = syncFile(f); err != nil { _ = f.Close(); return err }
 	if err = f.Close(); err != nil { return err }
+	w.crashPoint("ack.rotate.segment.durable")
 	d, err := os.Open(w.opts.Dir)
 	if err != nil { return err }
 	err = syncFile(d)
@@ -213,6 +214,7 @@ func (w *WAL) rotateAckSegment() error {
 		w.manifest.AckActiveSegment = oldID
 		return fmt.Errorf("commit ACK segment %d: %w", newID, err)
 	}
+	w.crashPoint("ack.rotate.manifest.committed")
 	if w.ack != nil {
 		if err = w.ack.Close(); err != nil {
 			w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
@@ -228,6 +230,7 @@ func (w *WAL) rotateAckSegment() error {
 		w.failed = errors.Join(w.failed, fmt.Errorf("open committed ACK segment %d: %w", newID, err))
 		return err
 	}
+	w.crashPoint("ack.rotate.handle.switched")
 	return nil
 }
 
@@ -249,6 +252,7 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 	if keepErr != nil { _ = tmp.Close(); _ = os.Remove(tmpPath); return keepErr }
 	if err = syncFile(tmp); err != nil { _ = tmp.Close(); _ = os.Remove(tmpPath); return err }
 	if err = tmp.Close(); err != nil { _ = os.Remove(tmpPath); return err }
+	w.crashPoint("ack.compact.segment.durable")
 	if err = os.Rename(tmpPath, path); err != nil { _ = os.Remove(tmpPath); return err }
 	d, err := os.Open(w.opts.Dir)
 	if err != nil { return err }
@@ -266,6 +270,7 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 		return fmt.Errorf("publish compacted ACK segment: %w", err)
 	}
 
+	w.crashPoint("ack.compact.manifest.expanded")
 	oldHandle := w.ack
 	newHandle, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if openErr != nil {
@@ -282,6 +287,7 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 		}
 	}
 
+	w.crashPoint("ack.compact.handle.switched")
 	// Second commit narrows the authoritative range to the compacted segment.
 	// On uncertainty, the first committed range still includes the new active
 	// segment, which is where ACK() now appends.
@@ -291,5 +297,9 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 		w.manifest.AckFirstSegment = oldFirst
 		return fmt.Errorf("commit compacted ACK lower boundary: %w", err)
 	}
-	return w.cleanupObsoleteAckSegments()
+	if err = w.saveManifest(); err != nil { w.manifest.AckFirstSegment = oldFirst; return fmt.Errorf("commit compacted ACK lower boundary: %w", err) }
+	w.crashPoint("ack.compact.manifest.narrowed")
+	if err = w.cleanupObsoleteAckSegments(); err != nil { return err }
+	w.crashPoint("ack.compact.obsolete.deleted")
+	return nil
 }
