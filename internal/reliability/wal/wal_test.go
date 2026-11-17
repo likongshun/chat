@@ -1510,3 +1510,61 @@ func BenchmarkWALBacklogSnapshotRecovery(b *testing.B) {
 		if err = w.Close(); err != nil { b.Fatal(err) }
 	}
 }
+
+
+func TestWALProcessKillAfterACKCompactionBoundaryAndDuringPartialDeletion(t *testing.T) {
+	t.Run("ACK lower boundary committed before old segment unlink", func(t *testing.T) {
+		dir := t.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		first, err := w.Append("crash-event", json.RawMessage(`{"v":1}`))
+		if err != nil { t.Fatal(err) }
+		second, err := w.Append("crash-event-2", json.RawMessage(`{"v":2}`))
+		if err != nil { t.Fatal(err) }
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+		}
+		if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "checkpoint", "ack.compact.manifest.narrowed")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.AckFirstSegment != w.manifest.AckActiveSegment {
+			t.Fatalf("ACK lower boundary was not recovered: %+v", w.manifest)
+		}
+		pending, err := w.PendingWithAcks()
+		if err != nil { t.Fatal(err) }
+		if len(pending) != 1 || pending[0].Seq != 2 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+			t.Fatalf("ACK state changed after old-segment deletion recovery: %+v", pending)
+		}
+		if _, err = os.Stat(ackSegmentPath(dir, 1)); !os.IsNotExist(err) {
+			t.Fatalf("obsolete ACK segment was not removed during recovery: %v", err)
+		}
+	})
+
+	t.Run("partial Data segment unlink resumes after restart", func(t *testing.T) {
+		dir := t.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		for i := 1; i <= 3; i++ {
+			record, appendErr := w.Append(fmt.Sprintf("delete-%d", i), json.RawMessage(fmt.Sprintf(`{"v":%d}`, i)))
+			if appendErr != nil { t.Fatal(appendErr) }
+			for _, sink := range []string{"mqtt", "influx"} {
+				if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+			}
+		}
+		if err = w.Checkpoint(3); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "reclaim", "data.reclaim.segment.deleted")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatalf("recover partial segment deletion: %v", err) }
+		defer w.Close()
+		if w.manifest.FirstSegment < 4 { t.Fatalf("reclaim did not preserve committed deletion boundary: %+v", w.manifest) }
+		for id := uint64(1); id <= 3; id++ {
+			if _, statErr := os.Stat(filepath.Join(dir, fmt.Sprintf("data-%020d.wal", id))); !os.IsNotExist(statErr) {
+				t.Fatalf("obsolete segment %d remains after recovery: %v", id, statErr)
+			}
+		}
+	})
+}
