@@ -536,7 +536,7 @@ func (w *WAL) cleanupCheckpointGenerations()error{
   changed=true
  }
  legacy:=filepath.Join(w.opts.Dir,"checkpoint.json")
- if keep!="checkpoint.json" { if err=os.Remove(legacy);err==nil{changed=true}else if !os.IsNotExist(err){return err} }
+ if w.manifest.Version>=5 && keep!="checkpoint.json" { if err=os.Remove(legacy);err==nil{changed=true}else if !os.IsNotExist(err){return err} }
  if changed { d,openErr:=os.Open(w.opts.Dir);if openErr!=nil{return openErr};syncErr:=syncFile(d);_ = d.Close();if syncErr!=nil{return syncErr} }
  return nil
 }
