@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/likongshun/chat/internal/config"
+
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/reliability/wal"
@@ -15,6 +17,10 @@ import (
 
 type Server struct {
 	Addr      string
+	Config    *config.Manager
+	Latest    *collector.LatestStore
+	Influx    *InfluxQueryOptions
+	InfluxClient *http.Client
 	Collector *collector.Metrics
 	WAL       *wal.WAL
 	Delivery  *pipeline.DeliveryMetrics
@@ -57,6 +63,7 @@ func (s *Server) Handler() http.Handler {
  })
  mux.HandleFunc("/readyz", s.ready)
  mux.HandleFunc("/metrics", s.metrics)
+ s.registerDataAPI(mux)
  return mux
 }
 
