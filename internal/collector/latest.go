@@ -86,3 +86,11 @@ func (s *LatestStore) Snapshot(deviceID string) map[string]LatestSample {
 	for _,v:=range s.items { out[v.PointCode]=v }
 	return out
 }
+
+func (s *LatestStore) LastSuccess(deviceID string) time.Time {
+	if s==nil{return time.Time{}}
+	s.mu.RLock();defer s.mu.RUnlock()
+	var latest time.Time
+	for _,sample:=range s.byDevice[deviceID] { if sample.LastSuccess.After(latest) { latest=sample.LastSuccess } }
+	return latest
+}
