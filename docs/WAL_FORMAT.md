@@ -60,19 +60,20 @@ An ACK is durable only after ACK WAL sync succeeds. MQTT and InfluxDB states are
 
 ## Checkpoint semantics currently implemented
 
-The current checkpoint is a **fully acknowledged sequence prefix**, not a snapshot containing pending records:
+The checkpoint sequence is the **largest fully acknowledged contiguous prefix**. Manifest v6 checkpoints also contain a complete snapshot of every record above that prefix that is not yet acknowledged by both sinks. Each pending snapshot entry stores the original record payload, event ID, creation time, and independent MQTT/Influx ACK flags. A checkpoint at sequence zero is valid and can persist the entire initial backlog before the first event is fully acknowledged.
 
 1. Sync the active Data and ACK logs.
-2. Verify that every record in the newly covered range has both MQTT and Influx ACKs.
-3. Write an immutable `checkpoint-<seq>.json.tmp`, sync it, rename it to its sequence-specific final name, and sync the directory.
-4. Update `MANIFEST.tmp`, sync it, atomically rename it to `MANIFEST`, and sync the WAL directory.
-5. After the checkpoint manifest commit, write and sync a new ACK segment containing only ACK records above the checkpoint boundary. Extend the manifest range to include the new segment, switch the active ACK writer, then commit the narrowed first-segment boundary. Delete old ACK segments only after that second commit and sync the directory.
+2. Verify that every record in the newly covered prefix has both MQTT and Influx ACKs, with no sequence gaps.
+3. Scan the complete retained suffix and snapshot every not-fully-ACKed record with its independent sink state. The suffix is checked for sequence continuity through the last appended record.
+4. Write an immutable checkpoint generation, sync it, rename it to its final name, and sync the directory. When refreshing the same prefix with changed pending ACK state, a new generation filename is used; the old committed generation remains until MANIFEST commits the replacement.
+5. Update `MANIFEST.tmp`, sync it, atomically rename it to `MANIFEST`, and sync the WAL directory. Manifest v6 binds the exact checkpoint filename and payload checksum, including valid sequence-zero pending snapshots.
+6. After the checkpoint manifest commit, write and sync a new ACK segment containing only ACK records above the checkpoint boundary. Extend the manifest range to include the new segment, switch the active ACK writer, then commit the narrowed first-segment boundary. Delete old ACK segments only after that second commit and sync the directory.
 
 Versioned checkpoint filenames are important: a checkpoint written before a failed manifest commit must not overwrite the checkpoint referenced by the old manifest. Orphan checkpoint generations are ignored.
 
 ACK compaction happens only after the checkpoint manifest commit. If the process crashes before compaction, the old ACK segments remain authoritative. During compaction, the first manifest update expands the range before the active writer switches; the second narrows the range only after the new writer is active. If either update has an uncertain outcome, the old active segment or new active segment remains inside every possible committed range, and obsolete segments are not deleted prematurely. If compaction cannot complete, the checkpoint may already be committed and the call returns an error; recovery can retry compaction.
 
-Manifest version 5 records the checkpoint sequence, explicit checkpoint filename, checkpoint payload SHA-256, Data and ACK segment boundaries, and a SHA-256 checksum over the canonical JSON fields excluding the manifest checksum itself. Recovery validates the checkpoint filename as a basename (no path traversal), then verifies the referenced bytes and checksum. Versions 1 through 4 remain readable; opening a legacy WAL migrates ACK state and upgrades the manifest to v5. Version 2 introduced the manifest checksum, version 3 binds exact checkpoint bytes, version 4 adds manifest-managed ACK segment boundaries, and version 5 adds an explicit checkpoint file reference.
+Manifest version 6 records the checkpoint sequence, explicit checkpoint filename (including sequence-zero snapshots), checkpoint payload SHA-256, Data and ACK segment boundaries, and a SHA-256 checksum over the canonical JSON fields excluding the manifest checksum itself. Recovery validates the checkpoint filename as a basename (no path traversal), verifies the referenced bytes and checksum, and cross-checks every pending snapshot record against the retained Data WAL. Versions 1 through 5 remain readable; opening a legacy WAL migrates ACK state and upgrades the manifest to v6. Version 2 introduced the manifest checksum, version 3 binds exact checkpoint bytes, version 4 adds manifest-managed ACK segment boundaries, version 5 adds an explicit checkpoint file reference, and version 6 adds complete pending-record snapshots.
 
 ## Recovery and reclaim order
 
@@ -107,10 +108,10 @@ All WAL file and directory sync paths use one instrumented sync wrapper. It expo
 
 The following items are **not complete** and must not be assumed from the current implementation:
 
-- A complete checkpoint snapshot with explicit pending-record and per-sink ACK state remains outstanding.
+- Process-kill fault injection and real disk-full/reserve-exhaustion tests must pass on the target filesystem before production durability can be claimed.
 - Formal, operator-facing format migration tooling and a complete pending-record checkpoint snapshot.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
-- Process-kill fault injection at every checkpoint/manifest/unlink boundary.
+- Expand subprocess crash injection to every checkpoint/manifest/ACK rotation/unlink boundary and run it on the production filesystem.
 - Real disk-full and reserve-exhaustion tests.
 - Long-running soak tests and target-storage benchmarks.
 
