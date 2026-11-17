@@ -1019,3 +1019,45 @@ func TestACKReserveReplenishmentSerializesWithConcurrentACK(t *testing.T) {
 	close(errs)
 	for err := range errs { t.Fatal(err) }
 }
+
+
+func TestManifestV4MigrationMaterializesLegacyCheckpointFile(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("legacy-checkpoint-file", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	manifestPath := filepath.Join(dir, "MANIFEST")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil { t.Fatal(err) }
+	var manifest Manifest
+	if err = json.Unmarshal(raw, &manifest); err != nil { t.Fatal(err) }
+	oldCheckpoint := checkpointPath(dir, record.Seq)
+	legacyCheckpoint := filepath.Join(dir, "checkpoint.json")
+	if err = os.Rename(oldCheckpoint, legacyCheckpoint); err != nil { t.Fatal(err) }
+	manifest.Version = 4
+	manifest.CheckpointFile = ""
+	manifest.Checksum, err = manifestChecksum(manifest)
+	if err != nil { t.Fatal(err) }
+	raw, err = json.Marshal(manifest)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(manifestPath, raw, 0600); err != nil { t.Fatal(err) }
+
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("load legacy checkpoint.json: %v", err) }
+	if err = reopened.saveManifest(); err != nil { t.Fatalf("migrate explicit checkpoint reference: %v", err) }
+	if reopened.manifest.Version != 5 || reopened.manifest.CheckpointFile != filepath.Base(oldCheckpoint) {
+		t.Fatalf("legacy checkpoint reference was not migrated: %+v", reopened.manifest)
+	}
+	if _, err = os.Stat(oldCheckpoint); err != nil { t.Fatalf("derived checkpoint copy was not materialized: %v", err) }
+	if err = reopened.Close(); err != nil { t.Fatal(err) }
+	final, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen migrated checkpoint: %v", err) }
+	defer final.Close()
+}
