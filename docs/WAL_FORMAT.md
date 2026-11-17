@@ -10,6 +10,7 @@ data/wal/
   MANIFEST
   MANIFEST.tmp
   checkpoint-00000000000000000012.json
+  checkpoint-00000000000000000012-00000000000000000001.json
   checkpoint-00000000000000000012.json.tmp
   data-00000000000000000001.wal
   data-00000000000000000002.wal
@@ -65,7 +66,7 @@ The checkpoint sequence is the **largest fully acknowledged contiguous prefix**.
 1. Sync the active Data and ACK logs.
 2. Verify that every record in the newly covered prefix has both MQTT and Influx ACKs, with no sequence gaps.
 3. Scan the complete retained suffix and snapshot every not-fully-ACKed record with its independent sink state. The suffix is checked for sequence continuity through the last appended record.
-4. Write an immutable checkpoint generation, sync it, rename it to its final name, and sync the directory. When refreshing the same prefix with changed pending ACK state, a new generation filename is used; the old committed generation remains until MANIFEST commits the replacement.
+4. Write an immutable checkpoint generation, sync it, rename it to its final name, and sync the directory. When refreshing the same prefix with changed pending ACK state, a new generation filename is used; the old committed generation remains until MANIFEST commits the replacement. Recovery removes unreferenced generations only after validating the committed one.
 5. Update `MANIFEST.tmp`, sync it, atomically rename it to `MANIFEST`, and sync the WAL directory. Manifest v6 binds the exact checkpoint filename and payload checksum, including valid sequence-zero pending snapshots.
 6. After the checkpoint manifest commit, write and sync a new ACK segment containing only ACK records above the checkpoint boundary. Extend the manifest range to include the new segment, switch the active ACK writer, then commit the narrowed first-segment boundary. Delete old ACK segments only after that second commit and sync the directory.
 
