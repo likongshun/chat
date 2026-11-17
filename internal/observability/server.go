@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/likongshun/chat/internal/config"
@@ -24,6 +25,11 @@ type Server struct {
 	Collector *collector.Metrics
 	WAL       *wal.WAL
 	Delivery  *pipeline.DeliveryMetrics
+
+	configIndexMu sync.RWMutex
+	indexedConfig *config.Config
+	pointsByModel map[string][]config.Point
+	pointCounts map[string]int
 }
 
 func (s *Server) Run(ctx context.Context) error {
