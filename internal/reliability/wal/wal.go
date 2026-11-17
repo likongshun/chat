@@ -17,16 +17,16 @@ import (
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; manifestExists bool; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error }
 func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
  w:=&WAL{opts:o,lock:l,next:1};fail:=func(e error)(*WAL,error){l.close();return nil,e}
  if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil&&!errors.Is(err,syscall.ENOSPC){return fail(err)}
- if err=w.loadManifest();err!=nil{return fail(err)};if err=w.prepareAckSegments();err!=nil{return fail(err)};if err=w.repairActiveTails();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
+ if err=w.loadManifest();err!=nil{return fail(err)};if err=w.prepareInitialDataSegment();err!=nil{return fail(err)};if err=w.prepareAckSegments();err!=nil{return fail(err)};if err=w.repairActiveTails();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
 }
 func (w *WAL) loadManifest()error{
- b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
+ b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e};w.manifestExists=true
  if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1&&w.manifest.Version!=2&&w.manifest.Version!=3&&w.manifest.Version!=4{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.Version>=4&&(w.manifest.AckFirstSegment==0||w.manifest.AckActiveSegment<w.manifest.AckFirstSegment){return fmt.Errorf("invalid manifest ACK segment range")};if w.manifest.Version>=2{if w.manifest.Checksum==""{return fmt.Errorf("manifest checksum is required for version 2")};expected,err:=manifestChecksum(w.manifest);if err!=nil{return err};if !strings.EqualFold(expected,w.manifest.Checksum){return fmt.Errorf("manifest checksum mismatch")}};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};if w.manifest.Version>=3{if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required")};sum:=sha256.Sum256(cp);if !strings.EqualFold(hex.EncodeToString(sum[:]),w.manifest.CheckpointChecksum){return fmt.Errorf("checkpoint checksum mismatch")}};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
 }
 func (w *WAL) repairActiveTails()error{
@@ -34,10 +34,8 @@ func (w *WAL) repairActiveTails()error{
   filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment)),
   ackSegmentPath(w.opts.Dir, func() uint64 { if w.manifest.AckActiveSegment == 0 { return 1 }; return w.manifest.AckActiveSegment }()),
  }
- for i,p:=range paths{
-  flags:=os.O_RDWR
-  if i==0{flags|=os.O_CREATE}
-  f,e:=os.OpenFile(p,flags,0600);if e!=nil{return fmt.Errorf("open committed WAL file %s: %w",p,e)}
+ for _,p:=range paths{
+  f,e:=os.OpenFile(p,os.O_RDWR,0600);if e!=nil{return fmt.Errorf("open committed WAL file %s: %w",p,e)}
   if e=f.Close();e!=nil{return e}
   if e=repairFrameTail(p);e!=nil{return e}
  }
@@ -426,6 +424,7 @@ func (w *WAL) saveManifest()error{
   return e
  }
  w.manifest=next
+ w.manifestExists=true
  return nil
 }
 func atomicFile(path string,b []byte)error{
