@@ -1061,3 +1061,32 @@ func TestManifestV4MigrationMaterializesLegacyCheckpointFile(t *testing.T) {
 	if err != nil { t.Fatalf("reopen migrated checkpoint: %v", err) }
 	defer final.Close()
 }
+
+
+func TestRecoveryRemovesEmptyUncommittedDataSegmentOrphan(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	orphan := filepath.Join(dir, "data-00000000000000000002.wal")
+	if err = os.WriteFile(orphan, nil, 0600); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer reopened.Close()
+	if _, err = os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("empty uncommitted data segment was not cleaned: %v", err)
+	}
+}
+
+func TestRecoveryFailsClosedOnNonEmptyUncommittedDataSegment(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	orphan := filepath.Join(dir, "data-00000000000000000002.wal")
+	if err = os.WriteFile(orphan, []byte("uncommitted data"), 0600); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil || !strings.Contains(err.Error(), "uncommitted data segment") {
+		t.Fatalf("non-empty orphan must fail closed, got %v", err)
+	}
+	if _, err = os.Stat(orphan); err != nil { t.Fatalf("non-empty orphan must be preserved for diagnosis: %v", err) }
+}
