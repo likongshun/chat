@@ -4,7 +4,7 @@ FROM golang:1.23-alpine AS build
 WORKDIR /src
 
 # 可通过 docker compose build --build-arg GOPROXY=... 指定可用的 Go 模块代理。
-ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 
 RUN apk add --no-cache ca-certificates git
