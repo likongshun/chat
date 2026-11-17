@@ -90,8 +90,11 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  var estimate int64
  for i,event:=range events{
   if event.EventID==""{return nil,fmt.Errorf("event %d: event_id is required",i)}
+  if len(event.EventID)>1024{return nil,fmt.Errorf("event %d: event_id exceeds 1024 bytes",i)}
   if len(event.Payload)==0||!json.Valid(event.Payload){return nil,fmt.Errorf("event %d: payload must be valid JSON",i)}
-  estimate+=int64(len(event.Payload))+256
+  // JSON escaping can expand each event ID byte to six bytes; account for
+  // that worst case so admission never underestimates encoded WAL size.
+  estimate+=int64(len(event.Payload))+int64(len(event.EventID))*6+256
  }
  usage,e:=w.diskUsage();if e!=nil{return nil,e}
  if usage+estimate>w.admissionLimitBytes(){w.capacityRejections.Add(1);return nil,ErrCapacity}
