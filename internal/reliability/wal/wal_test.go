@@ -410,3 +410,37 @@ func TestAppendFailStopKeepsACKButBlocksMetadataDeletion(t *testing.T) {
 		t.Fatal("reclaim must fail closed while append outcome is uncertain")
 	}
 }
+
+
+func TestCheckpointReadyReplenishesACKReserve(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	record, err := w.Append("reserve-replenish", json.RawMessage(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reservePath := filepath.Join(dir, "ack.reserve")
+	if err = os.Remove(reservePath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.CheckpointReady(); err != nil {
+		t.Fatalf("checkpoint worker should replenish reserve: %v", err)
+	}
+	info, err := os.Stat(reservePath)
+	if err != nil {
+		t.Fatalf("ACK reserve was not recreated: %v", err)
+	}
+	if info.Size() != 4096 {
+		t.Fatalf("ACK reserve size=%d, want 4096", info.Size())
+	}
+}
