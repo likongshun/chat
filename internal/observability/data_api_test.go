@@ -53,7 +53,7 @@ func TestInfluxHistoryAPIAndQueryValidation(t *testing.T) {
 	path:="/api/v1/telemetry?"+url.Values{"device_id":{"meter-1"},"point_id":{"power"},"from":{from},"to":{to}}.Encode()
 	response:=httptest.NewRecorder();server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodGet,path,nil))
 	if response.Code!=http.StatusOK||!strings.Contains(response.Body.String(),"\"value\":42.5")||!strings.Contains(response.Body.String(),"\"quality\":\"good\""){t.Fatalf("history response %d: %s",response.Code,response.Body.String())}
-	for _,part:=range []string{`r.device_id == "meter-1"`,`r.point_code == "power"`,`limit(n: 500)`}{if !strings.Contains(query,part){t.Fatalf("Flux query missing %q: %s",part,query)}}
+	for _,part:=range []string{`r.device_id == "meter-1"`,`r.point_code == "power"`,`limit(n: 500)`,`aggregateWindow(every:`}{if !strings.Contains(query,part){t.Fatalf("Flux query missing %q: %s",part,query)}}
 	old:=time.Now().UTC().Add(-8*24*time.Hour).Format(time.RFC3339)
 	badPath:="/api/v1/telemetry?"+url.Values{"device_id":{"meter-1"},"point_id":{"power"},"from":{old},"to":{to}}.Encode()
 	bad:=httptest.NewRecorder();server.Handler().ServeHTTP(bad,httptest.NewRequest(http.MethodGet,badPath,nil))
