@@ -44,8 +44,9 @@ func (s *LatestStore) Update(samples []Sample) {
 		if element:=s.index[key]; element!=nil {
 			previous:=s.items[key]
 			lastSuccess:=previous.LastSuccess
-			if sample.Quality!=QualityCommError { lastSuccess=sample.Timestamp }
-			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
+			value:=sample.Value
+			if sample.Quality==QualityCommError { value=previous.Value } else { lastSuccess=sample.Timestamp }
+			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 			s.items[key]=latest
 			s.byDevice[sample.DeviceID][sample.PointCode]=latest
 			s.order.MoveToBack(element)
