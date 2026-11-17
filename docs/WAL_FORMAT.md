@@ -71,7 +71,7 @@ Versioned checkpoint filenames are important: a checkpoint written before a fail
 
 ACK compaction happens only after the manifest commit. If the process crashes before compaction, the old ACK log is still safe. If it crashes after compaction, all ACK state at or below the boundary is already represented by the committed fully-ACKed prefix; later ACKs are retained. If compaction cannot complete, the checkpoint is committed but the call returns an error explaining that ACK compaction failed.
 
-Manifest version 2 records format version, checkpoint sequence, first required Data segment, active Data segment, and a SHA-256 checksum over the canonical JSON fields excluding the checksum itself. Recovery rejects a missing or mismatched v2 checksum. Version 1 manifests remain readable and are upgraded to version 2 on the next successful metadata commit. The checkpoint filename is still derived from the sequence; a separate checkpoint checksum and explicit checkpoint filename are not yet implemented.
+Manifest version 3 records format version, checkpoint sequence, checkpoint payload SHA-256, first required Data segment, active Data segment, and a SHA-256 checksum over the canonical JSON fields excluding the manifest checksum itself. Recovery rejects missing or mismatched v3 checkpoint/manifest checksums. Version 1 and version 2 manifests remain readable; the next successful metadata commit upgrades them to version 3. Version 2 introduced the manifest checksum, while version 3 binds the exact checkpoint bytes to the manifest. The checkpoint filename is still derived from the sequence; an explicit checkpoint filename/reference field is not yet implemented.
 
 ## Recovery and reclaim order
 
