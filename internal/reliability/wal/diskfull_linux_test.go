@@ -25,18 +25,19 @@ func fillFilesystemUntilENOSPC(t *testing.T, mountDir, name string) string {
 	}
 	// Buffered writes can report ENOSPC while a small final block remains.
 	// Use fallocate in 64 KiB then 4 KiB units to consume every allocatable block.
+	fallocateNoSpace := false
 	for _, chunk := range []int64{64 << 10, 4 << 10} {
 		for {
 			info, statErr := f.Stat()
 			if statErr != nil { _ = f.Close(); t.Fatal(statErr) }
 			allocErr := syscall.Fallocate(int(f.Fd()), 0, info.Size(), chunk)
-			if errors.Is(allocErr, syscall.ENOSPC) { break }
+			if errors.Is(allocErr, syscall.ENOSPC) { fallocateNoSpace = true; break }
 			if allocErr != nil { _ = f.Close(); t.Fatalf("fallocate filler extent: %v", allocErr) }
 		}
 	}
 	syncErr := f.Sync()
 	if syncErr != nil && !errors.Is(syncErr, syscall.ENOSPC) { _ = f.Close(); t.Fatalf("sync filler to force physical allocation: %v", syncErr) }
-	if !errors.Is(syncErr, syscall.ENOSPC) && !writeNoSpace {
+	if !errors.Is(syncErr, syscall.ENOSPC) && !writeNoSpace && !fallocateNoSpace {
 		_ = f.Close()
 		t.Fatal("bounded filesystem did not reach ENOSPC after writing/fallocate filler")
 	}
