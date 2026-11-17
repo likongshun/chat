@@ -10,7 +10,7 @@ var ErrCapacity = errors.New("WAL capacity limit reached")
 type Options struct { Dir string; SegmentBytes int64; MaxBytes int64; ReserveBytes int64; Sync bool }
 type Record struct { Seq uint64 `json:"seq"`; EventID string `json:"event_id"`; Payload json.RawMessage `json:"payload"`; CreatedAt time.Time `json:"created_at"` }
 type Ack struct { Seq uint64 `json:"seq"`; Sink string `json:"sink"`; EventID string `json:"event_id"` }
-type Manifest struct { Version int `json:"version"`; CheckpointSeq uint64 `json:"checkpoint_seq"`; CheckpointChecksum string `json:"checkpoint_checksum,omitempty"`; FirstSegment uint64 `json:"first_segment"`; ActiveSegment uint64 `json:"active_segment"`; Checksum string `json:"checksum,omitempty"` }
+type Manifest struct { Version int `json:"version"`; CheckpointSeq uint64 `json:"checkpoint_seq"`; CheckpointChecksum string `json:"checkpoint_checksum,omitempty"`; FirstSegment uint64 `json:"first_segment"`; ActiveSegment uint64 `json:"active_segment"`; AckFirstSegment uint64 `json:"ack_first_segment,omitempty"`; AckActiveSegment uint64 `json:"ack_active_segment,omitempty"`; Checksum string `json:"checksum,omitempty"` }
 type Checkpoint struct { Seq uint64 `json:"seq"`; CreatedAt time.Time `json:"created_at"` }
 
 type PendingRecord struct {
