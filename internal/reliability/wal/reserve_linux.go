@@ -21,7 +21,7 @@ func ensureAckReserve(dir string, size int64) error {
 	if err = syscall.Fallocate(int(f.Fd()), 0, 0, size); err != nil {
 		return fmt.Errorf("preallocate ACK reserve (%d bytes): %w", size, err)
 	}
-	return f.Sync()
+	return syncFile(f)
 }
 
 func releaseAckReserve(dir string) error {
@@ -30,5 +30,5 @@ func releaseAckReserve(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil { return err }
 	defer d.Close()
-	return d.Sync()
+	return syncFile(d)
 }
