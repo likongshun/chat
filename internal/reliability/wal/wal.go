@@ -530,6 +530,10 @@ func (w *WAL) cleanupCheckpointGenerations()error{
  if keep==""&&w.manifest.CheckpointSeq>0{keep=filepath.Base(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq))}
  files,err:=filepath.Glob(filepath.Join(w.opts.Dir,"checkpoint-*.json"));if err!=nil{return err}
  changed:=false
+ temps,err:=filepath.Glob(filepath.Join(w.opts.Dir,"checkpoint-*.json.tmp"));if err!=nil{return err}
+ for _,temp:=range temps{if err=os.Remove(temp);err!=nil&&!os.IsNotExist(err){return err};changed=true}
+ manifestTemp:=filepath.Join(w.opts.Dir,"MANIFEST.tmp")
+ if err=os.Remove(manifestTemp);err==nil{changed=true}else if !os.IsNotExist(err){return err}
  for _,path:=range files {
   if filepath.Base(path)==keep{continue}
   if err=os.Remove(path);err!=nil&&!os.IsNotExist(err){return err}
