@@ -891,3 +891,34 @@ func TestOpenFailsClosedWhenCommittedActiveDataSegmentIsMissing(t *testing.T) {
 		t.Fatalf("Open must not silently recreate a missing committed Data segment, stat err=%v", err)
 	}
 }
+
+
+func TestRecoveryCleansACKSegmentsAfterCommittedBoundaryAdvance(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	oldID := w.manifest.AckActiveSegment
+	newID := oldID + 1
+	newPath := ackSegmentPath(dir, newID)
+	f, err := os.OpenFile(newPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil { t.Fatal(err) }
+	if err = syncFile(f); err != nil { t.Fatal(err) }
+	if err = f.Close(); err != nil { t.Fatal(err) }
+	d, err := os.Open(dir)
+	if err != nil { t.Fatal(err) }
+	if err = syncFile(d); err != nil { t.Fatal(err) }
+	if err = d.Close(); err != nil { t.Fatal(err) }
+
+	w.manifest.AckFirstSegment, w.manifest.AckActiveSegment = newID, newID
+	if err = w.saveManifest(); err != nil { t.Fatal(err) }
+	if _, err = os.Stat(ackSegmentPath(dir, oldID)); err != nil { t.Fatalf("old ACK segment should remain until cleanup: %v", err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer reopened.Close()
+	if _, err = os.Stat(ackSegmentPath(dir, oldID)); !os.IsNotExist(err) {
+		t.Fatalf("recovery did not remove ACK segment left after committed boundary advance: %v", err)
+	}
+	if _, err = os.Stat(newPath); err != nil { t.Fatalf("committed ACK segment was removed: %v", err) }
+}
