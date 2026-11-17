@@ -18,7 +18,9 @@ import (
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; manifestExists bool; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; manifestExists bool; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error; faultHook func(string) }
+func (w *WAL) crashPoint(name string) { if w.faultHook != nil { w.faultHook(name) } }
+
 func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
@@ -480,11 +482,13 @@ func (w *WAL) Checkpoint(seq uint64)error{
  cpPath, e:=nextCheckpointPath(w.opts.Dir,seq);if e!=nil{return e}
  b,e:=json.Marshal(cp);if e!=nil{return e}
  if e=atomicFile(cpPath,b);e!=nil{return e}
+ w.crashPoint("checkpoint.file.durable")
  old:=w.manifest.CheckpointSeq
  oldFile:=w.manifest.CheckpointFile
  w.manifest.CheckpointSeq=seq
  w.manifest.CheckpointFile=filepath.Base(cpPath)
  if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;w.manifest.CheckpointFile=oldFile;return e}
+ w.crashPoint("checkpoint.manifest.committed")
  if e=w.compactAckLog(seq);e!=nil{return fmt.Errorf("checkpoint %d committed but ACK compaction failed: %w",seq,e)}
  if e=w.cleanupCheckpointGenerations();e!=nil{return fmt.Errorf("checkpoint %d committed but old generation cleanup failed: %w",seq,e)}
  return nil
@@ -576,10 +580,20 @@ func (w *WAL) saveManifest()error{
  next.Checksum=checksum
  b,e:=json.Marshal(next);if e!=nil{return e}
  if w.manifestCommitHook!=nil{if hookErr:=w.manifestCommitHook(next);hookErr!=nil{w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit hook: %w",hookErr));return hookErr}}
- if e=atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b);e!=nil{
-  w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit outcome is uncertain: %w",e))
-  return e
+ tmpPath:=filepath.Join(w.opts.Dir,"MANIFEST.tmp")
+ f,e:=os.OpenFile(tmpPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e}
+ if _,e=f.Write(b);e!=nil{_ = f.Close();return e}
+ if e=syncFile(f);e!=nil{_ = f.Close();return e}
+ if e=f.Close();e!=nil{return e}
+ w.crashPoint("manifest.tmp.synced")
+ if e=os.Rename(tmpPath,filepath.Join(w.opts.Dir,"MANIFEST"));e!=nil{
+  w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit outcome is uncertain: %w",e));return e
  }
+ w.crashPoint("manifest.renamed")
+ d,e:=os.Open(w.opts.Dir);if e!=nil{w.failed=errors.Join(w.failed,e);return e}
+ e=syncFile(d);_ = d.Close()
+ if e!=nil{w.failed=errors.Join(w.failed,fmt.Errorf("manifest directory sync outcome is uncertain: %w",e));return e}
+ w.crashPoint("manifest.dir.synced")
  w.manifest=next
  w.manifestExists=true
  return nil
@@ -629,7 +643,8 @@ func (w *WAL) Reclaim()error{
  w.manifest.FirstSegment=next
  if e=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
  // Once MANIFEST is durable, deletion may be resumed safely after a crash.
- for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
+ w.crashPoint("data.reclaim.manifest.committed")
+ for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e};w.crashPoint("data.reclaim.segment.deleted")}
  d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return syncFile(d)
 }
 // Stats returns an operational snapshot for health and Prometheus exporters.
