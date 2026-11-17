@@ -72,7 +72,6 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
 	cfg:=s.currentConfig()
 	if cfg==nil { writeJSON(w,http.StatusOK,[]deviceView{});return }
-	latest:=s.Latest.Snapshot("")
 	items:=make([]deviceView,0,len(cfg.Devices))
 	for _,d:=range cfg.Devices {
 		count:=0
