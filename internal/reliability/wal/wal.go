@@ -453,6 +453,11 @@ func (w *WAL) Reclaim()error{
  if w.manifest.CheckpointSeq==0{return nil}
  // A reclaim operation must be backed by the checkpoint committed by MANIFEST.
  raw,e:=os.ReadFile(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq));if os.IsNotExist(e){raw,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
+ if w.manifest.Version>=3{
+  if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required before reclaim")}
+  sum:=sha256.Sum256(raw)
+  if !strings.EqualFold(hex.EncodeToString(sum[:]),w.manifest.CheckpointChecksum){return fmt.Errorf("checkpoint checksum mismatch before reclaim")}
+ }
  var cp Checkpoint
  if e=json.Unmarshal(raw,&cp);e!=nil{return fmt.Errorf("decode committed checkpoint before reclaim: %w",e)}
  if cp.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match committed manifest %d",cp.Seq,w.manifest.CheckpointSeq)}
