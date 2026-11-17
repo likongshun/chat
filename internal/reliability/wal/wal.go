@@ -100,7 +100,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  records:=make([]Record,0,len(events))
  rollback:=func(cause error)([]Record,error){
   if err:=w.data.Truncate(start);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("rollback WAL batch: %w",err));return nil,w.failed}
-  if err:=w.data.Sync();err!=nil{w.failed=errors.Join(cause,fmt.Errorf("sync WAL rollback: %w",err));return nil,w.failed}
+  if err:=w.syncFile(data);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("sync WAL rollback: %w",err));return nil,w.failed}
   if _,err:=w.data.Seek(0,io.SeekEnd);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("seek WAL after rollback: %w",err));return nil,w.failed}
   return nil,cause
  }
@@ -111,7 +111,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
   records=append(records,record)
  }
  if w.opts.Sync{
-  if e=w.data.Sync();e!=nil{return rollback(e)}
+  if e=w.syncFile(data);e!=nil{return rollback(e)}
  }
  w.next+=uint64(len(records))
  st,e:=w.data.Stat();if e!=nil{return records,e}
@@ -127,7 +127,7 @@ func (w *WAL) rotate() error {
 	if w.manifest.ActiveSegment == ^uint64(0) {
 		return fmt.Errorf("WAL segment sequence exhausted")
 	}
-	if err := w.data.Sync(); err != nil {
+	if err := w.syncFile(data); err != nil {
 		return err
 	}
 
@@ -157,7 +157,7 @@ func (w *WAL) rotate() error {
 			return fmt.Errorf("uncommitted next segment %d is not empty", newID)
 		}
 	}
-	if err = created.Sync(); err != nil {
+	if err = syncFile(created); err != nil {
 		_ = created.Close()
 		return err
 	}
@@ -168,7 +168,7 @@ func (w *WAL) rotate() error {
 	if err != nil {
 		return err
 	}
-	err = dir.Sync()
+	err = syncFile(dir)
 	_ = dir.Close()
 	if err != nil {
 		return fmt.Errorf("sync directory after creating segment %d: %w", newID, err)
@@ -220,10 +220,10 @@ func (w *WAL) Ack(a Ack)error{
   if _,e=w.ack.Seek(0,io.SeekEnd);e!=nil{return e}
   if e=writeFrame(w.ack,b);e!=nil{return e}
  }
- if e=w.ack.Sync();e!=nil{
+ if e=w.syncFile(ack);e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
   if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
-  if e=w.ack.Sync();e!=nil{return e}
+  if e=w.syncFile(ack);e!=nil{return e}
  }
  return nil
 }
@@ -321,8 +321,8 @@ func (w *WAL) Checkpoint(seq uint64)error{
  if seq<w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint cannot move backwards from %d to %d",w.manifest.CheckpointSeq,seq)}
  if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
  // Freeze and persist both logs before recording a checkpoint boundary.
- if w.data!=nil{if e:=w.data.Sync();e!=nil{return e}}
- if w.ack!=nil{if e:=w.ack.Sync();e!=nil{return e}}
+ if w.data!=nil{if e:=w.syncFile(data);e!=nil{return e}}
+ if w.ack!=nil{if e:=w.syncFile(ack);e!=nil{return e}}
  acked,e:=w.ackState();if e!=nil{return e}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
  sort.Strings(files)
@@ -372,10 +372,10 @@ func (w *WAL) compactAckLog(boundary uint64)error{
   return nil
  })
  if keepErr!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return keepErr}
- if e=tmp.Sync();e!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return e}
+ if e=syncFile(tmp);e!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return e}
  if e=tmp.Close();e!=nil{_ = os.Remove(tmpPath);return e}
  if w.ack!=nil{
-  if e=w.ack.Sync();e!=nil{_ = os.Remove(tmpPath);return e}
+  if e=w.syncFile(ack);e!=nil{_ = os.Remove(tmpPath);return e}
   if e=w.ack.Close();e!=nil{_ = os.Remove(tmpPath);return e}
   w.ack=nil
  }
@@ -385,7 +385,7 @@ func (w *WAL) compactAckLog(boundary uint64)error{
  }
  d,e:=os.Open(w.opts.Dir)
  var syncErr error
- if e!=nil{syncErr=e}else{syncErr=d.Sync();_ = d.Close()}
+ if e!=nil{syncErr=e}else{syncErr=syncFile(d);_ = d.Close()}
  w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
  if e!=nil{return e}
  return syncErr
@@ -406,7 +406,7 @@ func (w *WAL) cleanupObsoleteSegments()error{
    changed=true
   }
  }
- if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()}
+ if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return syncFile(d)}
  return nil
 }
 
@@ -440,7 +440,7 @@ func (w *WAL) saveManifest()error{
  return nil
 }
 func atomicFile(path string,b []byte)error{
- tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=f.Sync();e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return d.Sync()
+ tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=syncFile(f);e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return syncFile(d)
 }
 func (w *WAL) Reclaim()error{
  w.mu.Lock();defer w.mu.Unlock()
@@ -478,7 +478,7 @@ func (w *WAL) Reclaim()error{
  if e=w.saveManifest();e!=nil{w.manifest.FirstSegment=old;return e}
  // Once MANIFEST is durable, deletion may be resumed safely after a crash.
  for _,p:=range remove{if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}}
- d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
+ d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return syncFile(d)
 }
 // Stats returns an operational snapshot for health and Prometheus exporters.
 func (w *WAL) Stats()(Stats,error){
@@ -501,7 +501,7 @@ func (w *WAL) Stats()(Stats,error){
 
 func (w *WAL) Close()error{
  w.mu.Lock();defer w.mu.Unlock();if w.closed{return nil};w.closed=true;var es []string
- if w.data!=nil{if e:=w.data.Sync();e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
- if w.ack!=nil{if e:=w.ack.Sync();e!=nil{es=append(es,e.Error())};if e:=w.ack.Close();e!=nil{es=append(es,e.Error())}}
+ if w.data!=nil{if e:=w.syncFile(data);e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
+ if w.ack!=nil{if e:=w.syncFile(ack);e!=nil{es=append(es,e.Error())};if e:=w.ack.Close();e!=nil{es=append(es,e.Error())}}
  if w.lock!=nil{if e:=w.lock.close();e!=nil{es=append(es,e.Error())}};if len(es)>0{return fmt.Errorf("%s",strings.Join(es,"; "))};return nil
 }
