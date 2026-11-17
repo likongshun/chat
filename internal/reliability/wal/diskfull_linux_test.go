@@ -45,7 +45,7 @@ func TestWALRealFilesystemFullACKReserve(t *testing.T) {
 	t.Run("ACK consumes physically preallocated reserve", func(t *testing.T) {
 		dir := filepath.Join(mountDir, "wal-reserve-success")
 		if err = os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
-		w, openErr := Open(Options{Dir: dir, SegmentBytes: 8 << 20, MaxBytes: 64 << 20, ReserveBytes: 4 << 20, Sync: true})
+		w, openErr := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 64 << 20, ReserveBytes: 4 << 20, Sync: true})
 		if openErr != nil { t.Fatal(openErr) }
 		record, appendErr := w.Append("real-enospc-ack", []byte(`{"v":1}`))
 		if appendErr != nil { _ = w.Close(); t.Fatal(appendErr) }
@@ -66,8 +66,29 @@ func TestWALRealFilesystemFullACKReserve(t *testing.T) {
 			_ = w.Close()
 			t.Fatalf("ACK reserve should have been consumed: %v", statErr)
 		}
+		if ackErr := w.Ack(Ack{Seq: record.Seq, Sink: "influx", EventID: record.EventID}); ackErr != nil {
+			_ = w.Close()
+			t.Fatalf("second independent ACK should use space released from reserve: %v", ackErr)
+		}
+		checkpoint, checkpointErr := w.CheckpointReady()
+		if checkpoint != record.Seq { _ = w.Close(); t.Fatalf("checkpoint/reclaim did not advance under disk pressure: target=%d err=%v", checkpoint, checkpointErr) }
+		if checkpointErr != nil && !errors.Is(checkpointErr, syscall.ENOSPC) {
+			_ = w.Close()
+			t.Fatalf("unexpected checkpoint/reclaim failure under disk pressure: %v", checkpointErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, "data-00000000000000000001.wal")); !os.IsNotExist(statErr) {
+			_ = w.Close()
+			t.Fatalf("fully ACKed Data segment was not reclaimed under disk pressure: %v", statErr)
+		}
 		if closeErr := w.Close(); closeErr != nil { t.Fatal(closeErr) }
 		if removeErr := os.Remove(filler); removeErr != nil { t.Fatal(removeErr) }
+		w, openErr = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 64 << 20, ReserveBytes: 4 << 20, Sync: true})
+		if openErr != nil { t.Fatalf("reopen after disk pressure cleanup: %v", openErr) }
+		if _, statErr := os.Stat(filepath.Join(dir, "ack.reserve")); statErr != nil {
+			_ = w.Close()
+			t.Fatalf("ACK reserve was not replenished after space became available: %v", statErr)
+		}
+		if closeErr := w.Close(); closeErr != nil { t.Fatal(closeErr) }
 	})
 
 	t.Run("ACK fails closed after reserve exhaustion", func(t *testing.T) {
