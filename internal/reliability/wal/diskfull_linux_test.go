@@ -4,7 +4,6 @@ package wal
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -87,7 +86,3 @@ func TestWALRealFilesystemFullACKReserve(t *testing.T) {
 	})
 }
 
-func Example_fillFilesystemUntilENOSPC() {
-	fmt.Println("real ENOSPC test is enabled only on a dedicated mounted filesystem")
-	// Output: real ENOSPC test is enabled only on a dedicated mounted filesystem
-}
