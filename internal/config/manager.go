@@ -11,6 +11,12 @@ type Manager struct {
 	current atomic.Pointer[Config]
 }
 
+// ReadOnly returns the immutable active snapshot without copying its slices.
+// Callers must never mutate the returned value; use Current when a mutable copy is needed.
+func (m *Manager) ReadOnly() *Config {
+	return m.current.Load()
+}
+
 func (m *Manager) Current() *Config {
 	current := m.current.Load()
 	if current == nil {
