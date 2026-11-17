@@ -59,3 +59,8 @@ func TestInfluxHistoryAPIAndQueryValidation(t *testing.T) {
 	bad:=httptest.NewRecorder();server.Handler().ServeHTTP(bad,httptest.NewRequest(http.MethodGet,badPath,nil))
 	if bad.Code!=http.StatusBadRequest{t.Fatalf("wide range status=%d body=%s",bad.Code,bad.Body.String())}
 }
+
+func TestParseInfluxValuePreservesIntegerPrecision(t *testing.T) {
+	if got:=parseInfluxValue("9007199254740993","long");got!=int64(9007199254740993){t.Fatalf("int64 precision lost: %T %v",got,got)}
+	if got:=parseInfluxValue("18446744073709551615","unsignedLong");got!=uint64(^uint64(0)){t.Fatalf("uint64 precision lost: %T %v",got,got)}
+}
