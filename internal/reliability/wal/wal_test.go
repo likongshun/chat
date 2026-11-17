@@ -568,3 +568,16 @@ func TestFsyncMetricsTrackDataAndACKDurability(t *testing.T) {
 		t.Fatalf("fsync histogram buckets=%d, count=%d", bucketTotal, stats.Fsync.Count)
 	}
 }
+
+
+func TestFsyncMetricsCountSyncFailures(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "closed-sync")
+	if err != nil { t.Fatal(err) }
+	if err = f.Close(); err != nil { t.Fatal(err) }
+	before := snapshotFsyncMetrics()
+	if err = syncFile(f); err == nil { t.Fatal("sync on closed file should fail") }
+	after := snapshotFsyncMetrics()
+	if after.Count != before.Count+1 || after.Errors != before.Errors+1 {
+		t.Fatalf("fsync failure metrics not incremented: before=%+v after=%+v", before, after)
+	}
+}
