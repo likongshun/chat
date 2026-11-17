@@ -18,7 +18,7 @@ data/wal/
   ack.reserve
 ```
 
-The current implementation uses segmented Data WAL files and one ACK WAL file. It does **not** yet use segmented ACK WAL files or a dedicated `ack/` and `reserve/` directory hierarchy.
+The current implementation uses Manifest-managed numbered Data WAL and ACK WAL segment files in the WAL directory. ACK segments use the same configured segment-size threshold as Data segments; reserve space remains a separately preallocated file.
 
 The process obtains an exclusive OS lock on `.wal.lock` before recovery and holds it until close. Temporary files are not authoritative.
 
@@ -53,7 +53,7 @@ Each ACK frame contains:
 - `event_id`: exact event ID of that record;
 - `sink`: exactly `mqtt` or `influx`.
 
-An ACK is durable only after ACK WAL sync succeeds. MQTT and InfluxDB states are independent. Recovery validates ACK JSON, sink names, sequence references, and event IDs against retained data records. Duplicate ACKs are safe but may occupy extra log space until checkpoint compaction.
+An ACK is durable only after ACK WAL sync succeeds. MQTT and InfluxDB states are independent. Recovery validates ACK JSON, sink names, sequence references, and event IDs against retained data records. Duplicate ACKs are idempotent and do not append another frame.
 
 `PendingWithAcks()` returns each pending record together with `MQTTAcked` and `InfluxAcked`. A dispatcher must publish only to sinks that have not acknowledged that event.
 
