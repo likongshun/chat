@@ -491,6 +491,7 @@ func (w *WAL) Stats()(Stats,error){
   PendingRecords:len(pending),SegmentCount:len(ids),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.opts.MaxBytes-w.opts.ReserveBytes,
   CheckpointSeq:w.manifest.CheckpointSeq,
   FirstSegment:w.manifest.FirstSegment,ActiveSegment:w.manifest.ActiveSegment,
+  Fsync:snapshotFsyncMetrics(),
  }
  w.mu.Unlock()
  if stats.MaxBytes>0{stats.DiskUsedRatio=float64(stats.DiskBytes)/float64(stats.MaxBytes)}
