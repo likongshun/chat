@@ -151,6 +151,7 @@ func (w *WAL) rotateAckSegment() error {
 	if w.manifest.AckActiveSegment == ^uint64(0) {
 		return fmt.Errorf("ACK segment sequence exhausted")
 	}
+	oldManifest := w.manifest
 	oldID := w.manifest.AckActiveSegment
 	newID := oldID + 1
 	path := ackSegmentPath(w.opts.Dir, newID)
@@ -181,7 +182,7 @@ func (w *WAL) rotateAckSegment() error {
 	if w.ack != nil {
 		if err = w.ack.Close(); err != nil {
 			w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-			w.manifest.AckActiveSegment = oldID
+			w.manifest = oldManifest
 			w.failed = errors.Join(w.failed, fmt.Errorf("ACK segment handle switch failed after manifest commit: %w", err))
 			return err
 		}
@@ -189,7 +190,7 @@ func (w *WAL) rotateAckSegment() error {
 	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-		w.manifest.AckActiveSegment = oldID
+		w.manifest = oldManifest
 		w.failed = errors.Join(w.failed, fmt.Errorf("open committed ACK segment %d: %w", newID, err))
 		return err
 	}
