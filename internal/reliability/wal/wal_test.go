@@ -382,3 +382,31 @@ func TestAckRetryIsIdempotent(t *testing.T) {
 		t.Fatalf("duplicate ACK retry grew log: before=%d after=%d", before.Size(), after.Size())
 	}
 }
+
+
+func TestAppendFailStopKeepsACKButBlocksMetadataDeletion(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	record, err := w.Append("fail-stop-ack", json.RawMessage(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w.failed = errors.New("simulated uncertain append/manifest outcome")
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); err != nil {
+		t.Fatalf("ACK must remain available in append fail-stop: %v", err)
+	}
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "influx", EventID: record.EventID}); err != nil {
+		t.Fatalf("second sink ACK must remain available in append fail-stop: %v", err)
+	}
+	if err = w.Checkpoint(record.Seq); err == nil {
+		t.Fatal("checkpoint must fail closed while append outcome is uncertain")
+	}
+	if err = w.Reclaim(); err == nil {
+		t.Fatal("reclaim must fail closed while append outcome is uncertain")
+	}
+}
