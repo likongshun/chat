@@ -444,3 +444,49 @@ func TestCheckpointReadyReplenishesACKReserve(t *testing.T) {
 		t.Fatalf("ACK reserve size=%d, want 4096", info.Size())
 	}
 }
+
+
+func TestManifestV2ChecksumRejectsTampering(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	if _, err = w.Append("manifest-checksum", json.RawMessage(`{"v":1}`)); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	path := filepath.Join(dir, "MANIFEST")
+	raw, err := os.ReadFile(path)
+	if err != nil { t.Fatal(err) }
+	var m Manifest
+	if err = json.Unmarshal(raw, &m); err != nil { t.Fatal(err) }
+	if m.Version != 2 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
+	m.Checksum = strings.Repeat("0", len(m.Checksum))
+	tampered, err := json.Marshal(m)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(path, tampered, 0600); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected manifest checksum rejection, got %v", err)
+	}
+}
+
+func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
+	legacy, err := json.Marshal(Manifest{Version: 1, FirstSegment: 1, ActiveSegment: 1})
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(filepath.Join(dir, "MANIFEST"), legacy, 0600); err != nil { t.Fatal(err) }
+
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	if _, err = w.Append("legacy-upgrade", json.RawMessage(`{"v":1}`)); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	raw, err := os.ReadFile(filepath.Join(dir, "MANIFEST"))
+	if err != nil { t.Fatal(err) }
+	var upgraded Manifest
+	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
+	if upgraded.Version != 2 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err != nil {
+		t.Fatalf("reopen upgraded manifest: %v", err)
+	}
+}
