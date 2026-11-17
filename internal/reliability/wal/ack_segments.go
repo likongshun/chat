@@ -47,7 +47,10 @@ func (w *WAL) prepareAckSegments() error {
 		// authoritative, so removing the old file is safe and repeatable.
 		legacy := filepath.Join(w.opts.Dir, "ack.wal")
 		if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) { return err }
-		return nil
+		d, err := os.Open(w.opts.Dir)
+		if err != nil { return err }
+		defer d.Close()
+		return syncFile(d)
 	}
 
 	legacy := filepath.Join(w.opts.Dir, "ack.wal")
@@ -177,12 +180,16 @@ func (w *WAL) rotateAckSegment() error {
 	if w.ack != nil {
 		if err = w.ack.Close(); err != nil {
 			w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+			w.manifest.AckActiveSegment = oldID
+			w.failed = errorsJoin(w.failed, fmt.Errorf("ACK segment handle switch failed after manifest commit: %w", err))
 			return err
 		}
 	}
 	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 	if err != nil {
 		w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+		w.manifest.AckActiveSegment = oldID
+		w.failed = errorsJoin(w.failed, fmt.Errorf("open committed ACK segment %d: %w", newID, err))
 		return err
 	}
 	return nil
