@@ -38,6 +38,8 @@ jobs:
           docker compose config --quiet
       - name: Build collector container image
         run: docker build --tag modbus-collector:ci .
+      - name: Build dashboard container image
+        run: docker build --tag modbus-dashboard:ci ./web
       - name: Prepare bounded ext4 filesystem for real WAL ENOSPC test
         run: |
           sudo truncate -s 128M /tmp/modbus-wal-fs.img
