@@ -100,7 +100,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  records:=make([]Record,0,len(events))
  rollback:=func(cause error)([]Record,error){
   if err:=w.data.Truncate(start);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("rollback WAL batch: %w",err));return nil,w.failed}
-  if err:=w.syncFile(data);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("sync WAL rollback: %w",err));return nil,w.failed}
+  if err:=syncFile(w.data);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("sync WAL rollback: %w",err));return nil,w.failed}
   if _,err:=w.data.Seek(0,io.SeekEnd);err!=nil{w.failed=errors.Join(cause,fmt.Errorf("seek WAL after rollback: %w",err));return nil,w.failed}
   return nil,cause
  }
@@ -111,7 +111,7 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
   records=append(records,record)
  }
  if w.opts.Sync{
-  if e=w.syncFile(data);e!=nil{return rollback(e)}
+  if e=syncFile(w.data);e!=nil{return rollback(e)}
  }
  w.next+=uint64(len(records))
  st,e:=w.data.Stat();if e!=nil{return records,e}
@@ -127,7 +127,7 @@ func (w *WAL) rotate() error {
 	if w.manifest.ActiveSegment == ^uint64(0) {
 		return fmt.Errorf("WAL segment sequence exhausted")
 	}
-	if err := w.syncFile(data); err != nil {
+	if err := syncFile(w.data); err != nil {
 		return err
 	}
 
@@ -220,10 +220,10 @@ func (w *WAL) Ack(a Ack)error{
   if _,e=w.ack.Seek(0,io.SeekEnd);e!=nil{return e}
   if e=writeFrame(w.ack,b);e!=nil{return e}
  }
- if e=w.syncFile(ack);e!=nil{
+ if e=syncFile(w.ack);e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
   if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
-  if e=w.syncFile(ack);e!=nil{return e}
+  if e=syncFile(w.ack);e!=nil{return e}
  }
  return nil
 }
@@ -321,8 +321,8 @@ func (w *WAL) Checkpoint(seq uint64)error{
  if seq<w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint cannot move backwards from %d to %d",w.manifest.CheckpointSeq,seq)}
  if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
  // Freeze and persist both logs before recording a checkpoint boundary.
- if w.data!=nil{if e:=w.syncFile(data);e!=nil{return e}}
- if w.ack!=nil{if e:=w.syncFile(ack);e!=nil{return e}}
+ if w.data!=nil{if e:=syncFile(w.data);e!=nil{return e}}
+ if w.ack!=nil{if e:=syncFile(w.ack);e!=nil{return e}}
  acked,e:=w.ackState();if e!=nil{return e}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
  sort.Strings(files)
@@ -375,7 +375,7 @@ func (w *WAL) compactAckLog(boundary uint64)error{
  if e=syncFile(tmp);e!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return e}
  if e=tmp.Close();e!=nil{_ = os.Remove(tmpPath);return e}
  if w.ack!=nil{
-  if e=w.syncFile(ack);e!=nil{_ = os.Remove(tmpPath);return e}
+  if e=syncFile(w.ack);e!=nil{_ = os.Remove(tmpPath);return e}
   if e=w.ack.Close();e!=nil{_ = os.Remove(tmpPath);return e}
   w.ack=nil
  }
@@ -502,7 +502,7 @@ func (w *WAL) Stats()(Stats,error){
 
 func (w *WAL) Close()error{
  w.mu.Lock();defer w.mu.Unlock();if w.closed{return nil};w.closed=true;var es []string
- if w.data!=nil{if e:=w.syncFile(data);e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
- if w.ack!=nil{if e:=w.syncFile(ack);e!=nil{es=append(es,e.Error())};if e:=w.ack.Close();e!=nil{es=append(es,e.Error())}}
+ if w.data!=nil{if e:=syncFile(w.data);e!=nil{es=append(es,e.Error())};if e:=w.data.Close();e!=nil{es=append(es,e.Error())}}
+ if w.ack!=nil{if e:=syncFile(w.ack);e!=nil{es=append(es,e.Error())};if e:=w.ack.Close();e!=nil{es=append(es,e.Error())}}
  if w.lock!=nil{if e:=w.lock.close();e!=nil{es=append(es,e.Error())}};if len(es)>0{return fmt.Errorf("%s",strings.Join(es,"; "))};return nil
 }
