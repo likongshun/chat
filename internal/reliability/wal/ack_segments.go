@@ -158,6 +158,12 @@ func (w *WAL) cleanupObsoleteAckSegments() error {
 		return err
 	}
 	changed := false
+	temps, err := filepath.Glob(filepath.Join(w.opts.Dir, "ack-*.wal.tmp"))
+	if err != nil { return err }
+	for _, temp := range temps {
+		if err = os.Remove(temp); err != nil && !os.IsNotExist(err) { return err }
+		changed = true
+	}
 	for _, path := range files {
 		var id uint64
 		if _, err = fmt.Sscanf(filepath.Base(path), "ack-%d.wal", &id); err != nil {
