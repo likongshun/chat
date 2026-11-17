@@ -37,6 +37,7 @@ type Stats struct {
  AdmissionLimitBytes int64
  OldestPendingAge time.Duration
  SegmentCount int
+ AckSegmentCount int
  CheckpointSeq uint64
  FirstSegment uint64
  ActiveSegment uint64
