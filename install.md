@@ -910,3 +910,18 @@ docker compose down
 ---
 
 **项目地址：** https://github.com/likongshun/chat
+
+
+## Web 数据监控控制台
+
+项目提供独立的轻量级 Web 控制台，前端位于 `web/`，使用 Nginx 静态托管，并通过同源反向代理读取采集器监控接口。前端不连接数据库、不暴露 MQTT/InfluxDB/PostgreSQL 凭据。
+
+启动或更新：
+
+```bash
+docker compose up -d --build dashboard
+```
+
+默认仅绑定服务器本机 `127.0.0.1:8080`，访问 `http://127.0.0.1:8080`。如需通过局域网访问，可在 `.env` 设置 `DASHBOARD_BIND=0.0.0.0`，并在防火墙/反向代理层配置访问控制与 HTTPS；不要直接将无认证控制台暴露到公网。
+
+当前控制台展示采集轮次、样本累计、采集异常/超时、WAL 积压和容量水位、fsync P99、MQTT/InfluxDB 投递计数及服务健康状态，5 秒自动刷新。数据来自采集器 `/metrics`、`/healthz` 和 `/readyz`。此版本是运行监控视图；设备/寄存器实时值、历史曲线查询和设备详情 API 尚未接入，不能将监控样本增量误认为真实寄存器趋势。
