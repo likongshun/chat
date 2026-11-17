@@ -105,11 +105,9 @@ All WAL file and directory sync paths use one instrumented sync wrapper. It expo
 The following items are **not complete** and must not be assumed from the current implementation:
 
 - Segmented ACK WAL and a checkpoint snapshot with explicit pending-record and per-sink ACK state.
-- Manifest checksum, explicit checkpoint filename/checksum, and format migration tooling.
-- Automatic ACK reserve replenishment and tested disk-full behavior on the target filesystem.
-- Filesystem usage watermarks (warning/critical/stop) and capacity health metrics.
-- Process-kill fault injection at every checkpoint/manifest/unlink boundary.
-- Real disk-full and reserve-exhaustion tests.
+- Explicit checkpoint filename/reference fields and formal format migration tooling.
+- Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
+- Filesystem usage warning/critical/stop watermarks and threshold-based admission control.
 - Process-kill fault injection at every checkpoint/manifest/unlink boundary.
 - Real disk-full and reserve-exhaustion tests.
 - Long-running soak tests and target-storage benchmarks.
