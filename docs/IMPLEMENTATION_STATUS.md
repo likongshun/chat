@@ -69,10 +69,10 @@ Remaining WAL/delivery gaps:
 
 ## Verification
 
-- Commit `a0f726b96e49a13f80b5ec730983586f818ee204` passed the complete CI workflow (run `44025682775`): Go formatting, `go vet`, unit tests, race tests, backlog snapshot/recovery benchmark, Compose validation, Docker image build, real ext4 ENOSPC/reserve-exhaustion tests, and PostgreSQL/MQTT/InfluxDB integration tests.
+- Commit `8ba1524d0ee7548d544c48f1b7a7196bc62d1a42` passed the complete CI workflow (run `44026197943`): Go formatting, `go vet`, unit tests, race tests, backlog snapshot/recovery benchmark, Compose validation, Docker image build, real ext4 ENOSPC/reserve-exhaustion tests, and PostgreSQL/MQTT/InfluxDB integration tests.
 - The process-kill suite covers Data rotation before/after Manifest commit; checkpoint file and Manifest temp/rename boundaries; ACK rotation; ACK compaction before/after both Manifest commits; ACK temp cleanup; and Data/ACK segment deletion and partial-deletion recovery.
 - The real ext4 loopback test fills the filesystem to zero allocatable blocks. It verifies Data admission is rejected, ACK consumes the physically preallocated reserve and remains durable, checkpoint/reclaim can complete under pressure, reserve replenishes after space is freed, and ACK fails closed when the reserve has already been exhausted.
-- The 3,000-record backlog stress test verifies a fully acknowledged sequence-1 prefix plus a 2,999-record pending snapshot with independent sink state across restart. The 5-second CI benchmark completed 198 snapshot/compaction/reopen iterations at `29,881,232 ns/op` on the GitHub Actions runner; this is a microbenchmark, not a 5,000-device capacity claim.
+- The 10,000-record backlog stress test verifies a fully acknowledged sequence-1 prefix plus a 9,999-record pending snapshot with independent sink state across restart. The 30-second CI benchmark completed 628 snapshot/compaction/reopen iterations at `56,261,091 ns/op` on the GitHub Actions runner; this is a sustained microbenchmark, not a multi-hour soak or a 5,000-device capacity claim.
 - Earlier CI runs also passed ACK reserve concurrency and Manifest v5 checkpoint-reference migration coverage (runs `44016094424` and `44015889194`).
 - No physical Modbus device test, multi-hour production-filesystem soak, or 5,000-device load test has been completed.
 
