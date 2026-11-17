@@ -50,8 +50,10 @@ func main() {
 		log.Fatalf("open WAL: %v", err)
 	}
 
+	latestSamples := collector.NewLatestStore(envInt("LATEST_CACHE_MAX_POINTS", 100000))
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
+		Latest: latestSamples,
 		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
@@ -72,6 +74,9 @@ func main() {
 	observabilityDone := make(chan error, 1)
 	observabilityServer := &observability.Server{
 		Addr: envString("METRICS_ADDR", ":9090"),
+		Config: configManager,
+		Latest: latestSamples,
+		Influx: &observability.InfluxQueryOptions{URL: envString("INFLUXDB_URL", "http://influxdb:8086"), Org: envString("INFLUXDB_ORG", "modbus"), Bucket: envString("INFLUXDB_BUCKET", "telemetry"), Token: os.Getenv("INFLUXDB_TOKEN")},
 		Collector: collectorMetrics,
 		WAL: store,
 		Delivery: deliveryMetrics,
