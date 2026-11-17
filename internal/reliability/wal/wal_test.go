@@ -681,3 +681,16 @@ func TestManifestCommitFailureFailStopsMetadataButKeepsACKs(t *testing.T) {
 	}
 	if err = w.Reclaim(); err == nil { t.Fatal("reclaim must fail-stop after uncertain manifest commit") }
 }
+
+
+func TestAppendRejectsOversizedEventIDWithoutConsumingSequence(t *testing.T) {
+	w, err := Open(Options{Dir: t.TempDir(), MaxBytes: 1 << 20, ReserveBytes: 0, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	if _, err = w.Append(strings.Repeat("x", 1025), json.RawMessage(`{"v":1}`)); err == nil {
+		t.Fatal("expected oversized event_id rejection")
+	}
+	record, err := w.Append("valid-event", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	if record.Seq != 1 { t.Fatalf("first valid sequence=%d, want 1", record.Seq) }
+}
