@@ -543,3 +543,28 @@ func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
 }
+
+
+func TestFsyncMetricsTrackDataAndACKDurability(t *testing.T) {
+	before := snapshotFsyncMetrics()
+	w, err := Open(Options{Dir: t.TempDir(), MaxBytes: 1 << 20, ReserveBytes: 0, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("fsync-metric", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); err != nil { t.Fatal(err) }
+	stats, err := w.Stats()
+	if err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	if stats.Fsync.Count < before.Count+2 {
+		t.Fatalf("fsync count=%d, want at least %d", stats.Fsync.Count, before.Count+2)
+	}
+	if stats.Fsync.Errors < before.Errors {
+		t.Fatalf("fsync error counter moved backwards: before=%d after=%d", before.Errors, stats.Fsync.Errors)
+	}
+	var bucketTotal uint64
+	for _, count := range stats.Fsync.Buckets { bucketTotal += count }
+	if bucketTotal != stats.Fsync.Count {
+		t.Fatalf("fsync histogram buckets=%d, count=%d", bucketTotal, stats.Fsync.Count)
+	}
+}
