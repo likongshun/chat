@@ -371,12 +371,12 @@ func TestAckRetryIsIdempotent(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	ack := Ack{Seq: r.Seq, Sink: "mqtt", EventID: r.EventID}
 	if err = w.Ack(ack); err != nil { t.Fatal(err) }
-	before, err := os.Stat(filepath.Join(dir, "ack.wal"))
+	before, err := os.Stat(ackSegmentPath(dir, w.manifest.AckActiveSegment))
 	if err != nil { t.Fatal(err) }
 	for i := 0; i < 10; i++ {
 		if err = w.Ack(ack); err != nil { t.Fatal(err) }
 	}
-	after, err := os.Stat(filepath.Join(dir, "ack.wal"))
+	after, err := os.Stat(ackSegmentPath(dir, w.manifest.AckActiveSegment))
 	if err != nil { t.Fatal(err) }
 	if after.Size() != before.Size() {
 		t.Fatalf("duplicate ACK retry grew log: before=%d after=%d", before.Size(), after.Size())
@@ -458,7 +458,7 @@ func TestManifestV3ChecksumRejectsTampering(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var m Manifest
 	if err = json.Unmarshal(raw, &m); err != nil { t.Fatal(err) }
-	if m.Version != 3 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
+	if m.Version != 4 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
 	m.Checksum = strings.Repeat("0", len(m.Checksum))
 	tampered, err := json.Marshal(m)
 	if err != nil { t.Fatal(err) }
@@ -515,9 +515,9 @@ func TestManifestV2UpgradesToV3OnCommit(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 3 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 4 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
 	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
-	if err != nil { t.Fatalf("reopen v3 manifest: %v", err) }
+	if err != nil { t.Fatalf("reopen v4 manifest: %v", err) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
 }
 
@@ -538,7 +538,7 @@ func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 3 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 4 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
 	reopened, reopenErr := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
@@ -672,6 +672,7 @@ func TestManifestCommitFailureFailStopsMetadataButKeepsACKs(t *testing.T) {
 	if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil { t.Fatal(err) }
 
 	// Force the MANIFEST rename to fail after checkpoint bytes have been synced.
+	if err = os.Remove(filepath.Join(dir, "MANIFEST")); err != nil { t.Fatal(err) }
 	if err = os.Mkdir(filepath.Join(dir, "MANIFEST"), 0700); err != nil { t.Fatal(err) }
 	if err = w.Checkpoint(first.Seq); err == nil { t.Fatal("expected manifest commit failure") }
 	if w.failed == nil { t.Fatal("manifest commit failure must put metadata operations into fail-stop") }
@@ -732,7 +733,7 @@ func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	if err = writeFrame(dataFile, dataRaw); err != nil { t.Fatal(err) }
 	if err = syncFile(dataFile); err != nil { t.Fatal(err) }
 	if err = dataFile.Close(); err != nil { t.Fatal(err) }
-	legacy := filepath.Join(dir, "ack.wal")
+	legacy := ackSegmentPath(dir, w.manifest.AckActiveSegment)
 	f, err := os.Create(legacy)
 	if err != nil { t.Fatal(err) }
 	if err = writeFrame(f, []byte(`{"seq":1,"sink":"mqtt","event_id":"legacy"}`)); err != nil { t.Fatal(err) }
