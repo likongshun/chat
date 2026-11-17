@@ -449,6 +449,11 @@ func (w *WAL) cleanupObsoleteSegments()error{
   if seg<w.manifest.FirstSegment{
    if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}
    changed=true
+  }else if seg>w.manifest.ActiveSegment{
+   st,statErr:=os.Stat(p);if statErr!=nil{return statErr}
+   if st.Size()!=0{return fmt.Errorf("uncommitted data segment %d is non-empty",seg)}
+   if e=os.Remove(p);e!=nil&&!os.IsNotExist(e){return e}
+   changed=true
   }
  }
  if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};if e=syncFile(d);e!=nil{_ = d.Close();return e};_ = d.Close()}
