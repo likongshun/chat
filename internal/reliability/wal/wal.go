@@ -2,6 +2,7 @@ package wal
 
 import (
  "encoding/json"
+ "bytes"
  "crypto/sha256"
  "encoding/hex"
  "errors"
@@ -98,10 +99,11 @@ func (w *WAL) recover()error{
  if e:=w.cleanupObsoleteSegments();e!=nil{return e}
  max:=w.manifest.CheckpointSeq
  eventIDs:=make(map[uint64]string)
+ recordsBySeq:=make(map[uint64]Record)
  for seg:=w.manifest.FirstSegment;seg<=w.manifest.ActiveSegment;seg++{
   p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
   if _,e:=os.Stat(p);e!=nil{return fmt.Errorf("required data segment %d is unavailable: %w",seg,e)}
-  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};if r.Seq>w.manifest.CheckpointSeq{if _,ok:=eventIDs[r.Seq];ok{return fmt.Errorf("duplicate WAL sequence %d",r.Seq)};eventIDs[r.Seq]=r.EventID};return nil});e!=nil{return e}
+  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};if r.Seq>w.manifest.CheckpointSeq{if _,ok:=eventIDs[r.Seq];ok{return fmt.Errorf("duplicate WAL sequence %d",r.Seq)};eventIDs[r.Seq]=r.EventID;recordsBySeq[r.Seq]=r};return nil});e!=nil{return e}
   if seg==^uint64(0){break}
  }
  if max > w.manifest.CheckpointSeq {
@@ -112,9 +114,34 @@ func (w *WAL) recover()error{
 			if seq == ^uint64(0) { break }
 		}
 	}
+	if w.manifest.CheckpointSeq > 0 {
+		cpPath := checkpointPath(w.opts.Dir, w.manifest.CheckpointSeq)
+		if w.manifest.Version >= 5 { cpPath = filepath.Join(w.opts.Dir, w.manifest.CheckpointFile) }
+		raw, readErr := os.ReadFile(cpPath)
+		if readErr != nil { return fmt.Errorf("read committed checkpoint snapshot: %w", readErr) }
+		var snapshot Checkpoint
+		if readErr = json.Unmarshal(raw, &snapshot); readErr != nil { return fmt.Errorf("decode committed checkpoint snapshot: %w", readErr) }
+		if snapshot.FormatVersion > 2 { return fmt.Errorf("unsupported checkpoint format version %d", snapshot.FormatVersion) }
+		seen := make(map[uint64]bool, len(snapshot.Pending))
+		for _, pending := range snapshot.Pending {
+			if pending.Seq <= snapshot.Seq || pending.Seq == 0 || pending.EventID == "" || len(pending.Payload) == 0 || !json.Valid(pending.Payload) {
+				return fmt.Errorf("invalid pending record in checkpoint snapshot: seq=%d", pending.Seq)
+			}
+			if pending.MQTTAcked && pending.InfluxAcked { return fmt.Errorf("checkpoint snapshot contains fully acknowledged pending record %d", pending.Seq) }
+			if seen[pending.Seq] { return fmt.Errorf("duplicate pending record %d in checkpoint snapshot", pending.Seq) }
+			seen[pending.Seq] = true
+			record, ok := recordsBySeq[pending.Seq]
+			if !ok { return fmt.Errorf("checkpoint pending record %d is missing from retained Data WAL", pending.Seq) }
+			if record.EventID != pending.EventID || !bytes.Equal(record.Payload, pending.Payload) || !record.CreatedAt.Equal(pending.CreatedAt) {
+				return fmt.Errorf("checkpoint pending record %d does not match retained Data WAL", pending.Seq)
+			}
+		}
+	}
 	if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
  if e:=readAckFrames(w.opts.Dir,w.manifest,func(b []byte)error{var a Ack;if e:=json.Unmarshal(b,&a);e!=nil{return e};if a.Seq<=w.manifest.CheckpointSeq{return nil};id,ok:=eventIDs[a.Seq];if !ok{return fmt.Errorf("ACK references unknown sequence %d during recovery",a.Seq)};if id!=a.EventID{return fmt.Errorf("ACK event_id mismatch for sequence %d during recovery",a.Seq)};return nil});e!=nil{return fmt.Errorf("validate ACK references: %w",e)}
- w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")};return nil
+ w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")}
+ if e:=w.cleanupCheckpointGenerations();e!=nil{return e}
+ return nil
 }
 func (w *WAL) openActive()error{
  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e}
@@ -293,6 +320,19 @@ func (w *WAL) Ack(a Ack)error{
 }
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{}
+ if w.manifest.CheckpointSeq > 0 {
+  cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq)
+  if w.manifest.Version>=5 { cpPath=filepath.Join(w.opts.Dir,w.manifest.CheckpointFile) }
+  raw,err:=os.ReadFile(cpPath);if err!=nil{return nil,err}
+  var snapshot Checkpoint
+  if err=json.Unmarshal(raw,&snapshot);err!=nil{return nil,err}
+  for _,pending:=range snapshot.Pending {
+   if acked["mqtt"]==nil{acked["mqtt"]=map[uint64]bool{}}
+   if acked["influx"]==nil{acked["influx"]=map[uint64]bool{}}
+   if pending.MQTTAcked{acked["mqtt"][pending.Seq]=true}
+   if pending.InfluxAcked{acked["influx"][pending.Seq]=true}
+  }
+ }
  e:=readAckFrames(w.opts.Dir,w.manifest,func(b []byte)error{
   var a Ack
   if e:=json.Unmarshal(b,&a);e!=nil{return fmt.Errorf("decode ACK record: %w",e)}
@@ -413,22 +453,43 @@ func (w *WAL) Checkpoint(seq uint64)error{
   });if e!=nil{return e}
  }
  if !foundTarget{return fmt.Errorf("checkpoint target sequence %d is not present in retained WAL",seq)}
- cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()}
- cpPath:=checkpointPath(w.opts.Dir,seq)
- if _,statErr:=os.Stat(cpPath);os.IsNotExist(statErr){
-  b,e:=json.Marshal(cp);if e!=nil{return e}
-  if e=atomicFile(cpPath,b);e!=nil{return e}
- }else if statErr!=nil{return statErr}else{
-  existing,e:=os.ReadFile(cpPath);if e!=nil{return e};var saved Checkpoint
-  if e=json.Unmarshal(existing,&saved);e!=nil{return e}
-  if saved.Seq!=seq{return fmt.Errorf("existing checkpoint %d does not match requested %d",saved.Seq,seq)}
+ pendingSnapshot:=make([]PendingRecord,0)
+ expectedSnapshot:=seq+1
+ for _,p:=range files{
+  var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
+  if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
+  e=readFrames(p,func(b []byte)error{
+   var record Record;if e:=json.Unmarshal(b,&record);e!=nil{return e}
+   if record.Seq<=seq{return nil}
+   if record.Seq!=expectedSnapshot{return fmt.Errorf("checkpoint snapshot sequence gap: got %d, expected %d",record.Seq,expectedSnapshot)}
+   expectedSnapshot++
+   mqtt,influx:=acked["mqtt"][record.Seq],acked["influx"][record.Seq]
+   if !mqtt||!influx{pendingSnapshot=append(pendingSnapshot,PendingRecord{Record:record,MQTTAcked:mqtt,InfluxAcked:influx})}
+   return nil
+  });if e!=nil{return e}
  }
+ if expectedSnapshot!=w.next{return fmt.Errorf("checkpoint snapshot ends at %d but WAL next sequence is %d",expectedSnapshot-1,w.next-1)}
+ cp:=Checkpoint{FormatVersion:2,Seq:seq,CreatedAt:time.Now().UTC(),Pending:pendingSnapshot}
+ if w.manifest.CheckpointSeq==seq && w.manifest.CheckpointFile!="" {
+  existingRaw,readErr:=os.ReadFile(filepath.Join(w.opts.Dir,w.manifest.CheckpointFile))
+  if readErr==nil {
+   var existing Checkpoint
+   if json.Unmarshal(existingRaw,&existing)==nil && existing.FormatVersion>=2 {
+    oldPending,_:=json.Marshal(existing.Pending);newPending,_:=json.Marshal(cp.Pending)
+    if bytes.Equal(oldPending,newPending){return nil}
+   }
+  }
+ }
+ cpPath, e:=nextCheckpointPath(w.opts.Dir,seq);if e!=nil{return e}
+ b,e:=json.Marshal(cp);if e!=nil{return e}
+ if e=atomicFile(cpPath,b);e!=nil{return e}
  old:=w.manifest.CheckpointSeq
  oldFile:=w.manifest.CheckpointFile
  w.manifest.CheckpointSeq=seq
  w.manifest.CheckpointFile=filepath.Base(cpPath)
  if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;w.manifest.CheckpointFile=oldFile;return e}
  if e=w.compactAckLog(seq);e!=nil{return fmt.Errorf("checkpoint %d committed but ACK compaction failed: %w",seq,e)}
+ if e=w.cleanupCheckpointGenerations();e!=nil{return fmt.Errorf("checkpoint %d committed but old generation cleanup failed: %w",seq,e)}
  return nil
 }
 
@@ -437,6 +498,32 @@ func (w *WAL) compactAckLog(boundary uint64)error{
 }
 
 func checkpointPath(dir string,seq uint64)string{return filepath.Join(dir,fmt.Sprintf("checkpoint-%020d.json",seq))}
+func nextCheckpointPath(dir string,seq uint64)(string,error){
+ base:=checkpointPath(dir,seq)
+ if _,err:=os.Stat(base);os.IsNotExist(err){return base,nil}else if err!=nil{return "",err}
+ generation:=time.Now().UTC().UnixNano()
+ for generation>0 {
+  path:=filepath.Join(dir,fmt.Sprintf("checkpoint-%020d-%020d.json",seq,generation))
+  if _,err:=os.Stat(path);os.IsNotExist(err){return path,nil}else if err!=nil{return "",err}
+  generation++
+ }
+ return "",fmt.Errorf("checkpoint generation exhausted")
+}
+func (w *WAL) cleanupCheckpointGenerations()error{
+ keep:=w.manifest.CheckpointFile
+ if keep==""&&w.manifest.CheckpointSeq>0{keep=filepath.Base(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq))}
+ files,err:=filepath.Glob(filepath.Join(w.opts.Dir,"checkpoint-*.json"));if err!=nil{return err}
+ changed:=false
+ for _,path:=range files {
+  if filepath.Base(path)==keep{continue}
+  if err=os.Remove(path);err!=nil&&!os.IsNotExist(err){return err}
+  changed=true
+ }
+ legacy:=filepath.Join(w.opts.Dir,"checkpoint.json")
+ if keep!="checkpoint.json" { if err=os.Remove(legacy);err==nil{changed=true}else if !os.IsNotExist(err){return err} }
+ if changed { d,openErr:=os.Open(w.opts.Dir);if openErr!=nil{return openErr};syncErr:=syncFile(d);_ = d.Close();if syncErr!=nil{return syncErr} }
+ return nil
+}
 
 // cleanupObsoleteSegments resumes deletion after a crash that occurred after
 // the manifest commit but before every covered segment was unlinked.
