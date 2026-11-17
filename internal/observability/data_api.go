@@ -65,15 +65,34 @@ func (s *Server) registerDataAPI(mux *http.ServeMux) {
 
 func (s *Server) currentConfig() *config.Config {
 	if s.Config == nil { return nil }
-	return s.Config.Current()
+	return s.Config.ReadOnly()
+}
+
+func (s *Server) configurationIndex() (*config.Config,map[string][]config.Point,map[string]int) {
+	cfg:=s.currentConfig()
+	if cfg==nil { return nil,nil,nil }
+	s.configIndexMu.RLock()
+	if s.indexedConfig==cfg {
+		points,counts:=s.pointsByModel,s.pointCounts
+		s.configIndexMu.RUnlock()
+		return cfg,points,counts
+	}
+	s.configIndexMu.RUnlock()
+	points:=make(map[string][]config.Point)
+	counts:=make(map[string]int)
+	for _,p:=range cfg.Points { points[p.Model]=append(points[p.Model],p);if p.Enabled {counts[p.Model]++} }
+	if s.Config.ReadOnly()!=cfg { return cfg,points,counts }
+	s.configIndexMu.Lock()
+	if s.indexedConfig!=cfg { s.indexedConfig=cfg;s.pointsByModel=points;s.pointCounts=counts }
+	points,counts=s.pointsByModel,s.pointCounts
+	s.configIndexMu.Unlock()
+	return cfg,points,counts
 }
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
-	cfg:=s.currentConfig()
+	cfg,_,pointCounts:=s.configurationIndex()
 	if cfg==nil { writeJSON(w,http.StatusOK,[]deviceView{});return }
-	pointCounts:=make(map[string]int)
-	for _,p:=range cfg.Points { if p.Enabled { pointCounts[p.Model]++ } }
 	items:=make([]deviceView,0,len(cfg.Devices))
 	for _,d:=range cfg.Devices {
 		var seen *time.Time
@@ -91,15 +110,15 @@ func (s *Server) devicePoints(w http.ResponseWriter,r *http.Request) {
 	id=strings.TrimSuffix(id,"/points")
 	id=strings.Trim(id,"/")
 	if id==""||strings.Contains(id,"/") { http.NotFound(w,r);return }
-	cfg:=s.currentConfig()
+	cfg,pointsByModel,_:=s.configurationIndex()
 	if cfg==nil { writeJSON(w,http.StatusOK,[]pointView{});return }
 	var device *config.Device
 	for i:=range cfg.Devices { if cfg.Devices[i].ID==id { device=&cfg.Devices[i];break } }
 	if device==nil { http.NotFound(w,r);return }
 	latest:=s.Latest.Snapshot(id)
 	items:=make([]pointView,0)
-	for _,p:=range cfg.Points {
-		if !p.Enabled||p.Model!=device.Model {continue}
+	for _,p:=range pointsByModel[device.Model] {
+		if !p.Enabled {continue}
 		item:=pointView{ID:p.ID,Code:p.PointCode,Name:p.Name,Address:p.Address,Function:p.Function,DataType:p.DataType,Unit:p.Unit,Enabled:p.Enabled}
 		if v,ok:=latest[p.PointCode];ok { sample:=v;item.Latest=&sample }
 		items=append(items,item)
