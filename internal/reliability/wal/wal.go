@@ -25,9 +25,58 @@ func Open(o Options)(*WAL,error){
  if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil&&!errors.Is(err,syscall.ENOSPC){return fail(err)}
  if err=w.loadManifest();err!=nil{return fail(err)};if err=w.prepareInitialDataSegment();err!=nil{return fail(err)};if err=w.prepareAckSegments();err!=nil{return fail(err)};if err=w.repairActiveTails();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
 }
-func (w *WAL) loadManifest()error{
- b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e};w.manifestExists=true
- if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1&&w.manifest.Version!=2&&w.manifest.Version!=3&&w.manifest.Version!=4{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.Version>=4&&(w.manifest.AckFirstSegment==0||w.manifest.AckActiveSegment<w.manifest.AckFirstSegment){return fmt.Errorf("invalid manifest ACK segment range")};if w.manifest.Version>=2{if w.manifest.Checksum==""{return fmt.Errorf("manifest checksum is required for version 2")};expected,err:=manifestChecksum(w.manifest);if err!=nil{return err};if !strings.EqualFold(expected,w.manifest.Checksum){return fmt.Errorf("manifest checksum mismatch")}};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};if w.manifest.Version>=3{if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required")};sum:=sha256.Sum256(cp);if !strings.EqualFold(hex.EncodeToString(sum[:]),w.manifest.CheckpointChecksum){return fmt.Errorf("checkpoint checksum mismatch")}};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
+func (w *WAL) loadManifest() error {
+	b, err := os.ReadFile(filepath.Join(w.opts.Dir, "MANIFEST"))
+	if os.IsNotExist(err) {
+		w.manifest = Manifest{Version: 1, FirstSegment: 1, ActiveSegment: 1}
+		return nil
+	}
+	if err != nil { return err }
+	w.manifestExists = true
+	if err = json.Unmarshal(b, &w.manifest); err != nil { return fmt.Errorf("manifest: %w", err) }
+	if w.manifest.Version < 1 || w.manifest.Version > 5 {
+		return fmt.Errorf("unsupported manifest version %d", w.manifest.Version)
+	}
+	if w.manifest.FirstSegment == 0 || w.manifest.ActiveSegment < w.manifest.FirstSegment {
+		return fmt.Errorf("invalid manifest segment range")
+	}
+	if w.manifest.Version >= 4 && (w.manifest.AckFirstSegment == 0 || w.manifest.AckActiveSegment < w.manifest.AckFirstSegment) {
+		return fmt.Errorf("invalid manifest ACK segment range")
+	}
+	if w.manifest.Version >= 2 {
+		if w.manifest.Checksum == "" { return fmt.Errorf("manifest checksum is required for version 2") }
+		expected, checksumErr := manifestChecksum(w.manifest)
+		if checksumErr != nil { return checksumErr }
+		if !strings.EqualFold(expected, w.manifest.Checksum) { return fmt.Errorf("manifest checksum mismatch") }
+	}
+	if w.manifest.CheckpointSeq > 0 {
+		cpPath := checkpointPath(w.opts.Dir, w.manifest.CheckpointSeq)
+		if w.manifest.Version >= 5 {
+			name := w.manifest.CheckpointFile
+			if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
+				return fmt.Errorf("invalid manifest checkpoint file reference %q", name)
+			}
+			cpPath = filepath.Join(w.opts.Dir, name)
+		}
+		cp, readErr := os.ReadFile(cpPath)
+		if os.IsNotExist(readErr) && w.manifest.Version < 5 {
+			cp, readErr = os.ReadFile(filepath.Join(w.opts.Dir, "checkpoint.json"))
+		}
+		if readErr != nil { return fmt.Errorf("committed checkpoint missing: %w", readErr) }
+		if w.manifest.Version >= 3 {
+			if w.manifest.CheckpointChecksum == "" { return fmt.Errorf("manifest checkpoint checksum is required") }
+			sum := sha256.Sum256(cp)
+			if !strings.EqualFold(hex.EncodeToString(sum[:]), w.manifest.CheckpointChecksum) {
+				return fmt.Errorf("checkpoint checksum mismatch")
+			}
+		}
+		var checkpoint Checkpoint
+		if err = json.Unmarshal(cp, &checkpoint); err != nil { return fmt.Errorf("decode committed checkpoint: %w", err) }
+		if checkpoint.Seq != w.manifest.CheckpointSeq {
+			return fmt.Errorf("checkpoint sequence %d does not match manifest %d", checkpoint.Seq, w.manifest.CheckpointSeq)
+		}
+	}
+	return nil
 }
 func (w *WAL) repairActiveTails()error{
  paths:=[]string{
@@ -367,8 +416,10 @@ func (w *WAL) Checkpoint(seq uint64)error{
   if saved.Seq!=seq{return fmt.Errorf("existing checkpoint %d does not match requested %d",saved.Seq,seq)}
  }
  old:=w.manifest.CheckpointSeq
+ oldFile:=w.manifest.CheckpointFile
  w.manifest.CheckpointSeq=seq
- if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;return e}
+ w.manifest.CheckpointFile=filepath.Base(cpPath)
+ if e=w.saveManifest();e!=nil{w.manifest.CheckpointSeq=old;w.manifest.CheckpointFile=oldFile;return e}
  if e=w.compactAckLog(seq);e!=nil{return fmt.Errorf("checkpoint %d committed but ACK compaction failed: %w",seq,e)}
  return nil
 }
@@ -405,10 +456,12 @@ func manifestChecksum(m Manifest)(string,error){
 
 func (w *WAL) saveManifest()error{
  next:=w.manifest
- next.Version=4
+ next.Version=5
  next.CheckpointChecksum=""
  if next.CheckpointSeq>0{
-  cpPath:=checkpointPath(w.opts.Dir,next.CheckpointSeq)
+  if next.CheckpointFile==""{next.CheckpointFile=filepath.Base(checkpointPath(w.opts.Dir,next.CheckpointSeq))}
+  if filepath.Base(next.CheckpointFile)!=next.CheckpointFile||strings.ContainsAny(next.CheckpointFile,"/\\"){return fmt.Errorf("invalid checkpoint file reference %q",next.CheckpointFile)}
+  cpPath:=filepath.Join(w.opts.Dir,next.CheckpointFile)
   cp,e:=os.ReadFile(cpPath)
   if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))}
   if e!=nil{return fmt.Errorf("read checkpoint for manifest commit: %w",e)}
@@ -438,7 +491,9 @@ func (w *WAL) Reclaim()error{
  if w.failed!=nil{return fmt.Errorf("WAL reclaim is fail-stopped: %w",w.failed)}
  if w.manifest.CheckpointSeq==0{return nil}
  // A reclaim operation must be backed by the checkpoint committed by MANIFEST.
- raw,e:=os.ReadFile(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq));if os.IsNotExist(e){raw,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
+ cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq)
+ if w.manifest.Version>=5{cpPath=filepath.Join(w.opts.Dir,w.manifest.CheckpointFile)}
+ raw,e:=os.ReadFile(cpPath);if os.IsNotExist(e)&&w.manifest.Version<5{raw,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
  if w.manifest.Version>=3{
   if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required before reclaim")}
   sum:=sha256.Sum256(raw)
