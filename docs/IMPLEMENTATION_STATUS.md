@@ -69,11 +69,11 @@ Remaining WAL/delivery gaps:
 
 ## Verification
 
-- Commit `43f9c31d3578da456036bc9018d5cf557a959a4c` passed Go formatting, `go vet`, unit tests, race tests, Docker Compose validation, collector image build, and PostgreSQL/MQTT/InfluxDB integration tests (GitHub Actions run `44016264596`).
-- Commit `b798185f81f01abd7d702c7943d2320aa8fa151b` passed the same CI suite after adding explicit checkpoint-reference and Reclaim coverage (run `44015889194`).
-- Commit `d422391444e051dd9e55498a3dac1c53a287fd92` passed the same suite with concurrent ACK writes and ACK reserve replenishment coverage (run `44016094424`).
-- Unit tests cover WAL locking, ACK identity and idempotency, legacy ACK migration, ACK segment rotation and two-phase compaction, compaction manifest-failure recovery, checkpoint checksums and explicit references, path traversal rejection, torn-tail recovery, Data/ACK orphan cleanup, missing committed segment fail-closed behavior, sequence continuity, and per-sink delivery state.
-- The newest Data-orphan recovery and checkpoint migration additions have their own CI runs; verify their final conclusions before release.
+- Commit `a0f726b96e49a13f80b5ec730983586f818ee204` passed the complete CI workflow (run `44025682775`): Go formatting, `go vet`, unit tests, race tests, backlog snapshot/recovery benchmark, Compose validation, Docker image build, real ext4 ENOSPC/reserve-exhaustion tests, and PostgreSQL/MQTT/InfluxDB integration tests.
+- The process-kill suite covers Data rotation before/after Manifest commit; checkpoint file and Manifest temp/rename boundaries; ACK rotation; ACK compaction before/after both Manifest commits; ACK temp cleanup; and Data/ACK segment deletion and partial-deletion recovery.
+- The real ext4 loopback test fills the filesystem to zero allocatable blocks. It verifies Data admission is rejected, ACK consumes the physically preallocated reserve and remains durable, checkpoint/reclaim can complete under pressure, reserve replenishes after space is freed, and ACK fails closed when the reserve has already been exhausted.
+- The 3,000-record backlog stress test verifies a fully acknowledged sequence-1 prefix plus a 2,999-record pending snapshot with independent sink state across restart. The 5-second CI benchmark completed 198 snapshot/compaction/reopen iterations at `29,881,232 ns/op` on the GitHub Actions runner; this is a microbenchmark, not a 5,000-device capacity claim.
+- Earlier CI runs also passed ACK reserve concurrency and Manifest v5 checkpoint-reference migration coverage (runs `44016094424` and `44015889194`).
 - No physical Modbus device test, multi-hour production-filesystem soak, or 5,000-device load test has been completed.
 
 ## Remaining work
