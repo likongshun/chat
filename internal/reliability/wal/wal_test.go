@@ -725,7 +725,13 @@ func TestACKSegmentsRotateAndRecoverIndependentSinkState(t *testing.T) {
 func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
+	dataFile, err := os.Create(filepath.Join(dir, "data-00000000000000000001.wal"))
+	if err != nil { t.Fatal(err) }
+	dataRaw, err := json.Marshal(Record{Seq: 1, EventID: "legacy", Payload: json.RawMessage(`{"v":1}`), CreatedAt: time.Now().UTC()})
+	if err != nil { t.Fatal(err) }
+	if err = writeFrame(dataFile, dataRaw); err != nil { t.Fatal(err) }
+	if err = syncFile(dataFile); err != nil { t.Fatal(err) }
+	if err = dataFile.Close(); err != nil { t.Fatal(err) }
 	legacy := filepath.Join(dir, "ack.wal")
 	f, err := os.Create(legacy)
 	if err != nil { t.Fatal(err) }
