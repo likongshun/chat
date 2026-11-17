@@ -1443,3 +1443,70 @@ func TestACKReserveReleaseFailureNeverReportsSuccess(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if state["influx"][record.Seq] { t.Fatal("failed ACK was incorrectly marked durable") }
 }
+
+
+func TestWALBacklogSnapshotRecoveryStress(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 32 << 10, MaxBytes: 64 << 20, ReserveBytes: 1 << 20, Sync: true})
+	if err != nil { t.Fatal(err) }
+	const total = 3000
+	for start := 0; start < total; start += 100 {
+		batch := make([]AppendInput, 0, 100)
+		for i := start; i < start+100; i++ {
+			batch = append(batch, AppendInput{EventID: fmt.Sprintf("backlog-%06d", i+1), Payload: json.RawMessage(fmt.Sprintf(`{"index":%d,"padding":"%0128d"}`, i+1, i))})
+		}
+		if _, err = w.AppendBatch(batch); err != nil { t.Fatalf("append batch at %d: %v", start, err) }
+	}
+	first, second := uint64(1), uint64(2)
+	if err = w.Ack(Ack{Seq: first, Sink: "mqtt", EventID: "backlog-000001"}); err != nil { t.Fatal(err) }
+	if err = w.Ack(Ack{Seq: first, Sink: "influx", EventID: "backlog-000001"}); err != nil { t.Fatal(err) }
+	if err = w.Ack(Ack{Seq: second, Sink: "mqtt", EventID: "backlog-000002"}); err != nil { t.Fatal(err) }
+	if target, err := w.CheckpointReady(); err != nil || target != 1 {
+		t.Fatalf("checkpoint prefix=%d err=%v", target, err)
+	}
+	pending, err := w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != total-1 || pending[0].Seq != 2 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+		t.Fatalf("backlog snapshot has wrong pending state: count=%d first=%+v", len(pending), pending[0])
+	}
+	stats, err := w.Stats()
+	if err != nil { t.Fatal(err) }
+	if stats.SegmentCount < 2 || stats.PendingRecords != total-1 {
+		t.Fatalf("unexpected backlog storage stats: %+v", stats)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	w, err = Open(Options{Dir: dir, SegmentBytes: 32 << 10, MaxBytes: 64 << 20, ReserveBytes: 1 << 20, Sync: true})
+	if err != nil { t.Fatalf("recover large pending snapshot: %v", err) }
+	defer w.Close()
+	pending, err = w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != total-1 || pending[0].Seq != 2 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+		t.Fatalf("large pending backlog changed across recovery: count=%d first=%+v", len(pending), pending[0])
+	}
+	if _, err = w.CheckpointReady(); err != nil { t.Fatalf("idempotent checkpoint refresh: %v", err) }
+}
+
+func BenchmarkWALBacklogSnapshotRecovery(b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		dir := b.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1 << 20, MaxBytes: 128 << 20, ReserveBytes: 1 << 20, Sync: true})
+		if err != nil { b.Fatal(err) }
+		for start := 0; start < 1000; start += 100 {
+			batch := make([]AppendInput, 0, 100)
+			for i := start; i < start+100; i++ {
+				batch = append(batch, AppendInput{EventID: fmt.Sprintf("bench-%d", i), Payload: json.RawMessage(`{"temperature":23.5,"pressure":101.3}`)})
+			}
+			if _, err = w.AppendBatch(batch); err != nil { b.Fatal(err) }
+		}
+		first := "bench-0"
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: 1, Sink: sink, EventID: first}); err != nil { b.Fatal(err) }
+		}
+		if _, err = w.CheckpointReady(); err != nil { b.Fatal(err) }
+		if err = w.Close(); err != nil { b.Fatal(err) }
+		w, err = Open(Options{Dir: dir, MaxBytes: 128 << 20, ReserveBytes: 1 << 20, Sync: true})
+		if err != nil { b.Fatal(err) }
+		if err = w.Close(); err != nil { b.Fatal(err) }
+	}
+}
