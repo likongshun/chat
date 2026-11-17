@@ -1054,7 +1054,7 @@ func TestManifestV4MigrationMaterializesLegacyCheckpointFileToV6(t *testing.T) {
 	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatalf("load legacy checkpoint.json: %v", err) }
 	if err = reopened.saveManifest(); err != nil { t.Fatalf("migrate explicit checkpoint reference: %v", err) }
-	if reopened.manifest.Version != 5 || reopened.manifest.CheckpointFile != filepath.Base(oldCheckpoint) {
+	if reopened.manifest.Version != 6 || reopened.manifest.CheckpointFile != filepath.Base(oldCheckpoint) {
 		t.Fatalf("legacy checkpoint reference was not migrated: %+v", reopened.manifest)
 	}
 	if _, err = os.Stat(oldCheckpoint); err != nil { t.Fatalf("derived checkpoint copy was not materialized: %v", err) }
