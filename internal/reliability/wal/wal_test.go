@@ -338,6 +338,30 @@ func TestRotationPublishesDurableSegmentBeforeManifest(t *testing.T) {
 	if saved.ActiveSegment != 2 { t.Fatalf("persisted active segment=%d, want 2", saved.ActiveSegment) }
 }
 
+
+func TestAckRetryRejectsMismatchedEventID(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	record, err := w.Append("ack-identity", json.RawMessage(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}
+	if err = w.Ack(valid); err != nil {
+		t.Fatal(err)
+	}
+	forged := valid
+	forged.EventID = "different-event"
+	if err = w.Ack(forged); err == nil || !strings.Contains(err.Error(), "event_id mismatch") {
+		t.Fatalf("mismatched duplicate ACK must fail identity validation, got %v", err)
+	}
+}
+
 func TestAckRetryIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
