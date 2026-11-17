@@ -17,7 +17,7 @@ import (
  "time"
 )
 
-type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error; capacityRejections atomic.Uint64 }
+type WAL struct { mu sync.Mutex; opts Options; lock *fileLock; data *os.File; ack *os.File; manifest Manifest; next uint64; closed bool; failed error; capacityRejections atomic.Uint64; manifestCommitHook func(Manifest) error }
 func Open(o Options)(*WAL,error){
  if o.Dir==""{return nil,fmt.Errorf("WAL dir required")};if o.SegmentBytes<=0{o.SegmentBytes=64<<20};if o.MaxBytes<=0{o.MaxBytes=10<<30};if o.ReserveBytes<0||o.ReserveBytes>=o.MaxBytes{return nil,fmt.Errorf("reserve must be >=0 and less than max bytes")}
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
@@ -420,6 +420,7 @@ func (w *WAL) saveManifest()error{
  checksum,e:=manifestChecksum(next);if e!=nil{return e}
  next.Checksum=checksum
  b,e:=json.Marshal(next);if e!=nil{return e}
+ if w.manifestCommitHook!=nil{if hookErr:=w.manifestCommitHook(next);hookErr!=nil{w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit hook: %w",hookErr));return hookErr}}
  if e=atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b);e!=nil{
   w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit outcome is uncertain: %w",e))
   return e
