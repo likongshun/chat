@@ -107,7 +107,7 @@ The following items are **not complete** and must not be assumed from the curren
 - Segmented ACK WAL and a checkpoint snapshot with explicit pending-record and per-sink ACK state.
 - Explicit checkpoint filename/reference fields and formal format migration tooling.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
-- Filesystem usage warning/critical/stop watermarks and threshold-based admission control.
+- Linux filesystem usage is sampled with statfs; WAL/filesystem pressure levels are warning at 70%, critical at 85%, and stop at 95%. New Data admission is stopped at the 95% boundary (or earlier at the configured WAL budget/reserve boundary), while ACK and reclaim paths remain available.
 - Process-kill fault injection at every checkpoint/manifest/unlink boundary.
 - Real disk-full and reserve-exhaustion tests.
 - Long-running soak tests and target-storage benchmarks.
