@@ -314,15 +314,24 @@ func (w *WAL) Checkpoint(seq uint64)error{
  acked,e:=w.ackState();if e!=nil{return e}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
  sort.Strings(files)
+ expected := w.manifest.CheckpointSeq + 1
+ foundTarget := seq == w.manifest.CheckpointSeq
  for _,p:=range files{
   var seg uint64;_,_=fmt.Sscanf(filepath.Base(p),"data-%d.wal",&seg)
   if seg<w.manifest.FirstSegment||seg>w.manifest.ActiveSegment{continue}
   e=readFrames(p,func(b []byte)error{
    var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return e}
-   if r.Seq>w.manifest.CheckpointSeq&&r.Seq<=seq&&(!acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]){return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)}
+   if r.Seq<=w.manifest.CheckpointSeq{return nil}
+   if r.Seq<=seq {
+    if r.Seq!=expected{return fmt.Errorf("cannot checkpoint across sequence gap: got %d, expected %d",r.Seq,expected)}
+    if !acked["mqtt"][r.Seq]||!acked["influx"][r.Seq]{return fmt.Errorf("cannot checkpoint unacknowledged seq %d",r.Seq)}
+    expected++
+    if r.Seq==seq{foundTarget=true}
+   }
    return nil
   });if e!=nil{return e}
  }
+ if !foundTarget{return fmt.Errorf("checkpoint target sequence %d is not present in retained WAL",seq)}
  cp:=Checkpoint{Seq:seq,CreatedAt:time.Now().UTC()}
  cpPath:=checkpointPath(w.opts.Dir,seq)
  if _,statErr:=os.Stat(cpPath);os.IsNotExist(statErr){
