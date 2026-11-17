@@ -6,6 +6,9 @@ services:
       context: .
       dockerfile: Dockerfile
     image: modbus-collector:local
+    dns:
+      - 127.0.0.11
+      - 223.5.5.5
     restart: unless-stopped
     init: true
     environment:
