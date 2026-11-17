@@ -221,20 +221,40 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 	_ = d.Close()
 	if err != nil { return err }
 
-	oldFirst, oldActive := w.manifest.AckFirstSegment, w.manifest.AckActiveSegment
-	w.manifest.AckFirstSegment, w.manifest.AckActiveSegment = newID, newID
+	// First commit only extends the ACK range. If this MANIFEST rename or
+	// directory sync has an uncertain outcome, the old active segment remains
+	// inside either possible committed range, so ACKs can continue there.
+	oldManifest := w.manifest
+	w.manifest.AckActiveSegment = newID
 	if err = w.saveManifest(); err != nil {
-		w.manifest.AckFirstSegment, w.manifest.AckActiveSegment = oldFirst, oldActive
-		return fmt.Errorf("commit compacted ACK segment: %w", err)
+		w.manifest = oldManifest
+		return fmt.Errorf("publish compacted ACK segment: %w", err)
 	}
 
 	oldHandle := w.ack
-	w.ack = nil
 	newHandle, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-	if openErr != nil { return openErr }
+	if openErr != nil {
+		w.manifest = oldManifest
+		w.failed = errors.Join(w.failed, fmt.Errorf("open published ACK segment %d: %w", newID, openErr))
+		return openErr
+	}
 	w.ack = newHandle
 	if oldHandle != nil {
-		if closeErr := oldHandle.Close(); closeErr != nil { return closeErr }
+		if closeErr := oldHandle.Close(); closeErr != nil {
+			// New active handle is already live and is covered by the first
+			// manifest commit; retain it even if closing the old fd reports an error.
+			return closeErr
+		}
+	}
+
+	// Second commit narrows the authoritative range to the compacted segment.
+	// On uncertainty, the first committed range still includes the new active
+	// segment, which is where ACK() now appends.
+	oldFirst := w.manifest.AckFirstSegment
+	w.manifest.AckFirstSegment = newID
+	if err = w.saveManifest(); err != nil {
+		w.manifest.AckFirstSegment = oldFirst
+		return fmt.Errorf("commit compacted ACK lower boundary: %w", err)
 	}
 	return w.cleanupObsoleteAckSegments()
 }
