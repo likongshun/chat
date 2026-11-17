@@ -370,7 +370,12 @@ ready:
  if e=w.Reclaim();e!=nil{return target,e}
  // ACK reserve is released only as an emergency last-resort write allowance.
  // Retry preallocation after checkpoint compaction/reclaim has freed space.
- if e=ensureAckReserve(w.opts.Dir,w.opts.ReserveBytes);e!=nil{return target,fmt.Errorf("replenish ACK reserve: %w",e)}
+ // Serialize reserve replacement with ACK's emergency reserve release.
+ w.mu.Lock()
+ if w.closed{w.mu.Unlock();return target,os.ErrClosed}
+ e=ensureAckReserve(w.opts.Dir,w.opts.ReserveBytes)
+ w.mu.Unlock()
+ if e!=nil{return target,fmt.Errorf("replenish ACK reserve: %w",e)}
  return target,nil
 }
 
