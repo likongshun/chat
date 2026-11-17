@@ -951,6 +951,9 @@ func TestManifestV5UsesExplicitCheckpointFileReference(t *testing.T) {
 	if reopened.manifest.CheckpointFile != customName {
 		t.Fatalf("checkpoint reference changed on reopen: %+v", reopened.manifest)
 	}
+	if err = reopened.Reclaim(); err != nil {
+		t.Fatalf("reclaim must read the explicit checkpoint file reference: %v", err)
+	}
 }
 
 func TestManifestV5RejectsCheckpointPathTraversal(t *testing.T) {
