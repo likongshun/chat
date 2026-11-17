@@ -40,6 +40,9 @@ func TestHealthReadinessAndPrometheusMetrics(t *testing.T) {
 		"modbus_collector_polls_total",
 		"modbus_wal_pending_records 1",
 		"modbus_wal_capacity_rejections_total",
+		"modbus_wal_fsync_duration_seconds_bucket",
+		"modbus_wal_fsync_errors_total",
+		"modbus_wal_fsync_p99_seconds",
 		"modbus_delivery_published_total{sink=\"mqtt\"}",
 	} {
 		if !strings.Contains(body, metric) {
