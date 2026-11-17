@@ -16,15 +16,16 @@ func fillFilesystemUntilENOSPC(t *testing.T, mountDir, name string) string {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil { t.Fatal(err) }
 	block := make([]byte, 64<<10)
+	writeNoSpace := false
 	for {
 		n, writeErr := f.Write(block)
-		if errors.Is(writeErr, syscall.ENOSPC) { break }
+		if errors.Is(writeErr, syscall.ENOSPC) { writeNoSpace = true; break }
 		if writeErr != nil { _ = f.Close(); t.Fatalf("fill bounded filesystem: %v", writeErr) }
 		if n != len(block) { _ = f.Close(); t.Fatalf("short filler write: %d/%d", n, len(block)) }
 	}
 	syncErr := f.Sync()
 	if syncErr != nil && !errors.Is(syncErr, syscall.ENOSPC) { _ = f.Close(); t.Fatalf("sync filler to force physical allocation: %v", syncErr) }
-	if !errors.Is(syncErr, syscall.ENOSPC) && !errors.Is(err, syscall.ENOSPC) {
+	if !errors.Is(syncErr, syscall.ENOSPC) && !writeNoSpace {
 		_ = f.Close()
 		t.Fatal("bounded filesystem did not reach ENOSPC after writing filler")
 	}
