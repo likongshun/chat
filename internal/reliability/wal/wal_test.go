@@ -72,7 +72,7 @@ func TestRecoveryRejectsInvalidACKJSON(t *testing.T) {
  r,err:=w.Append("evt-1",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
  _=r
  if err=w.Close();err!=nil{t.Fatal(err)}
- f,err:=os.OpenFile(filepath.Join(dir,"ack.wal"),os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
+ f,err:=os.OpenFile(ackSegmentPath(dir,w.manifest.AckActiveSegment),os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
  if err=writeFrame(f,[]byte("{invalid json"));err!=nil{t.Fatal(err)}
  if err=f.Sync();err!=nil{t.Fatal(err)}
  _=f.Close()
@@ -146,7 +146,7 @@ func TestOpenRepairsTornActiveDataAndACKTailsBeforeRecovery(t *testing.T) {
  if err=w.Ack(Ack{Seq:r.Seq,Sink:"mqtt",EventID:r.EventID});err!=nil{t.Fatal(err)}
  if err=w.Close();err!=nil{t.Fatal(err)}
  dataPath:=filepath.Join(dir,"data-00000000000000000001.wal")
- for _,path:=range []string{dataPath,filepath.Join(dir,"ack.wal")}{
+ for _,path:=range []string{dataPath,ackSegmentPath(dir,w.manifest.AckActiveSegment)}{
   f,err:=os.OpenFile(path,os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
   if _,err=f.Write([]byte{0,0,0});err!=nil{t.Fatal(err)}
   if err=f.Sync();err!=nil{t.Fatal(err)}
@@ -170,7 +170,7 @@ func TestCheckpointCompactsOnlyACKsAtOrBelowBoundary(t *testing.T) {
  if err=w.Ack(Ack{Seq:second.Seq,Sink:"mqtt",EventID:second.EventID});err!=nil{t.Fatal(err)}
  if err=w.Checkpoint(first.Seq);err!=nil{t.Fatal(err)}
  count:=0
- if err=readFrames(filepath.Join(dir,"ack.wal"),func(b []byte)error{var a Ack;if err:=json.Unmarshal(b,&a);err!=nil{return err};if a.Seq<=first.Seq{t.Fatalf("checkpointed ACK seq %d was not compacted",a.Seq)};count++;return nil});err!=nil{t.Fatal(err)}
+ if err=readFrames(ackSegmentPath(dir,w.manifest.AckActiveSegment),func(b []byte)error{var a Ack;if err:=json.Unmarshal(b,&a);err!=nil{return err};if a.Seq<=first.Seq{t.Fatalf("checkpointed ACK seq %d was not compacted",a.Seq)};count++;return nil});err!=nil{t.Fatal(err)}
  if count!=1{t.Fatalf("retained ACK count=%d, want 1",count)}
  pending,err:=w.Pending();if err!=nil{t.Fatal(err)}
  if len(pending)!=1||pending[0].Seq!=second.Seq{t.Fatalf("pending=%v, want second record only",pending)}
@@ -203,7 +203,7 @@ func TestRecoveryRejectsACKEventIDMismatch(t *testing.T) {
  if err!=nil{t.Fatal(err)}
  r,err:=w.Append("correct-event",json.RawMessage(`{"v":1}`));if err!=nil{t.Fatal(err)}
  if err=w.Close();err!=nil{t.Fatal(err)}
- f,err:=os.OpenFile(filepath.Join(dir,"ack.wal"),os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
+ f,err:=os.OpenFile(ackSegmentPath(dir,w.manifest.AckActiveSegment),os.O_APPEND|os.O_WRONLY,0600);if err!=nil{t.Fatal(err)}
  raw,err:=json.Marshal(Ack{Seq:r.Seq,Sink:"mqtt",EventID:"wrong-event"});if err!=nil{t.Fatal(err)}
  if err=writeFrame(f,raw);err!=nil{t.Fatal(err)}
  if err=f.Sync();err!=nil{t.Fatal(err)}
@@ -263,10 +263,10 @@ func TestCheckpointReadyRetriesACKCompactionAfterManifestCommit(t *testing.T) {
  if err=atomicFile(checkpointPath(dir,r.Seq),cp);err!=nil{t.Fatal(err)}
  w.manifest.CheckpointSeq=r.Seq
  if err=w.saveManifest();err!=nil{t.Fatal(err)}
- before,err:=os.Stat(filepath.Join(dir,"ack.wal"));if err!=nil{t.Fatal(err)}
+ before,err:=os.Stat(ackSegmentPath(dir,w.manifest.AckActiveSegment));if err!=nil{t.Fatal(err)}
  if before.Size()==0{t.Fatal("test setup expected un-compacted ACK log")}
  if _,err=w.CheckpointReady();err!=nil{t.Fatal(err)}
- after,err:=os.Stat(filepath.Join(dir,"ack.wal"));if err!=nil{t.Fatal(err)}
+ after,err:=os.Stat(ackSegmentPath(dir,w.manifest.AckActiveSegment));if err!=nil{t.Fatal(err)}
  if after.Size()!=0{t.Fatalf("ACK log size after recovery compaction=%d, want 0",after.Size())}
  if err=w.Close();err!=nil{t.Fatal(err)}
 }
@@ -693,4 +693,63 @@ func TestAppendRejectsOversizedEventIDWithoutConsumingSequence(t *testing.T) {
 	record, err := w.Append("valid-event", json.RawMessage(`{"v":2}`))
 	if err != nil { t.Fatal(err) }
 	if record.Seq != 1 { t.Fatalf("first valid sequence=%d, want 1", record.Seq) }
+}
+
+
+func TestACKSegmentsRotateAndRecoverIndependentSinkState(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("ack-segment-rotation", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); err != nil { t.Fatal(err) }
+	if err = w.Ack(Ack{Seq: record.Seq, Sink: "influx", EventID: record.EventID}); err != nil { t.Fatal(err) }
+	if w.manifest.AckActiveSegment <= w.manifest.AckFirstSegment {
+		t.Fatalf("ACK segment did not rotate: %+v", w.manifest)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	reopened, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer reopened.Close()
+	pending, err := reopened.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 0 { t.Fatalf("fully ACKed record should not be pending: %+v", pending) }
+	state, err := reopened.ackState()
+	if err != nil { t.Fatal(err) }
+	if !state["mqtt"][record.Seq] || !state["influx"][record.Seq] {
+		t.Fatalf("ACK state lost across segments: %+v", state)
+	}
+}
+
+func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
+	legacy := filepath.Join(dir, "ack.wal")
+	f, err := os.Create(legacy)
+	if err != nil { t.Fatal(err) }
+	if err = writeFrame(f, []byte(`{"seq":1,"sink":"mqtt","event_id":"legacy"}`)); err != nil { t.Fatal(err) }
+	if err = syncFile(f); err != nil { t.Fatal(err) }
+	if err = f.Close(); err != nil { t.Fatal(err) }
+
+	manifest := Manifest{Version: 3, FirstSegment: 1, ActiveSegment: 1}
+	manifest.Checksum, err = manifestChecksum(manifest)
+	if err != nil { t.Fatal(err) }
+	raw, err := json.Marshal(manifest)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(filepath.Join(dir, "MANIFEST"), raw, 0600); err != nil { t.Fatal(err) }
+
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	if w.manifest.Version != 4 || w.manifest.AckFirstSegment != 1 || w.manifest.AckActiveSegment != 1 {
+		t.Fatalf("legacy manifest was not migrated: %+v", w.manifest)
+	}
+	if _, err = os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy ACK log should be removed only after migration commit, stat err=%v", err)
+	}
+	state, err := w.ackState()
+	if err != nil { t.Fatal(err) }
+	if !state["mqtt"][1] { t.Fatalf("legacy ACK was not migrated: %+v", state) }
 }
