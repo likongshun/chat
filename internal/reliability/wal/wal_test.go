@@ -922,3 +922,48 @@ func TestRecoveryCleansACKSegmentsAfterCommittedBoundaryAdvance(t *testing.T) {
 	}
 	if _, err = os.Stat(newPath); err != nil { t.Fatalf("committed ACK segment was removed: %v", err) }
 }
+
+
+func TestManifestV5UsesExplicitCheckpointFileReference(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("explicit-checkpoint-ref", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
+	oldPath := checkpointPath(dir, record.Seq)
+	customName := fmt.Sprintf("committed-checkpoint-%020d.json", record.Seq)
+	customPath := filepath.Join(dir, customName)
+	if err = os.Rename(oldPath, customPath); err != nil { t.Fatal(err) }
+	w.manifest.CheckpointFile = customName
+	if err = w.saveManifest(); err != nil { t.Fatal(err) }
+	if w.manifest.Version != 5 || w.manifest.CheckpointFile != customName {
+		t.Fatalf("explicit checkpoint reference not committed: %+v", w.manifest)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("open using explicit checkpoint reference: %v", err) }
+	defer reopened.Close()
+	if reopened.manifest.CheckpointFile != customName {
+		t.Fatalf("checkpoint reference changed on reopen: %+v", reopened.manifest)
+	}
+}
+
+func TestManifestV5RejectsCheckpointPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("checkpoint-path-traversal", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
+	w.manifest.CheckpointFile = "../outside.json"
+	if err = w.saveManifest(); err == nil { t.Fatal("unsafe checkpoint reference must not be committed") }
+	_ = w.Close()
+}
