@@ -918,10 +918,11 @@ docker compose down
 
 项目提供独立的轻量级 Web 控制台，前端位于 `web/`，使用 Nginx 静态托管，并通过同源反向代理读取采集器监控接口。前端不连接数据库、不暴露 MQTT/InfluxDB/PostgreSQL 凭据。
 
-启动或更新：
+拉取最新代码并启动/更新采集器 API 与 Web 控制台：
 
 ```bash
-docker compose up -d --build dashboard
+git pull --ff-only origin main
+docker compose up -d --build collector dashboard
 ```
 
 默认仅绑定服务器本机 `127.0.0.1:8080`，访问 `http://127.0.0.1:8080`。如需通过局域网访问，可在 `.env` 设置 `DASHBOARD_BIND=0.0.0.0`，并在防火墙/反向代理层配置访问控制与 HTTPS；不要直接将无认证控制台暴露到公网。
