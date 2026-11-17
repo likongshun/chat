@@ -43,6 +43,9 @@ func (w *WAL) loadManifest() error {
 	if w.manifest.Version >= 4 && (w.manifest.AckFirstSegment == 0 || w.manifest.AckActiveSegment < w.manifest.AckFirstSegment) {
 		return fmt.Errorf("invalid manifest ACK segment range")
 	}
+	if w.manifest.Version >= 5 && w.manifest.CheckpointSeq == 0 && w.manifest.CheckpointFile != "" {
+		return fmt.Errorf("checkpoint file reference must be empty when checkpoint sequence is zero")
+	}
 	if w.manifest.Version >= 2 {
 		if w.manifest.Checksum == "" { return fmt.Errorf("manifest checksum is required for version 2") }
 		expected, checksumErr := manifestChecksum(w.manifest)
@@ -458,6 +461,7 @@ func (w *WAL) saveManifest()error{
  next:=w.manifest
  next.Version=5
  next.CheckpointChecksum=""
+ if next.CheckpointSeq==0{next.CheckpointFile=""}
  if next.CheckpointSeq>0{
   if next.CheckpointFile==""{next.CheckpointFile=filepath.Base(checkpointPath(w.opts.Dir,next.CheckpointSeq))}
   if filepath.Base(next.CheckpointFile)!=next.CheckpointFile||strings.ContainsAny(next.CheckpointFile,"/\\"){return fmt.Errorf("invalid checkpoint file reference %q",next.CheckpointFile)}
