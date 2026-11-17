@@ -35,7 +35,7 @@ func (w *WAL) loadManifest() error {
 	if err != nil { return err }
 	w.manifestExists = true
 	if err = json.Unmarshal(b, &w.manifest); err != nil { return fmt.Errorf("manifest: %w", err) }
-	if w.manifest.Version < 1 || w.manifest.Version > 5 {
+	if w.manifest.Version < 1 || w.manifest.Version > 6 {
 		return fmt.Errorf("unsupported manifest version %d", w.manifest.Version)
 	}
 	if w.manifest.FirstSegment == 0 || w.manifest.ActiveSegment < w.manifest.FirstSegment {
@@ -44,7 +44,7 @@ func (w *WAL) loadManifest() error {
 	if w.manifest.Version >= 4 && (w.manifest.AckFirstSegment == 0 || w.manifest.AckActiveSegment < w.manifest.AckFirstSegment) {
 		return fmt.Errorf("invalid manifest ACK segment range")
 	}
-	if w.manifest.Version >= 5 && w.manifest.CheckpointSeq == 0 && w.manifest.CheckpointFile != "" {
+	if w.manifest.Version >= 5 && w.manifest.Version < 6 && w.manifest.CheckpointSeq == 0 && w.manifest.CheckpointFile != "" {
 		return fmt.Errorf("checkpoint file reference must be empty when checkpoint sequence is zero")
 	}
 	if w.manifest.Version >= 2 {
@@ -53,7 +53,7 @@ func (w *WAL) loadManifest() error {
 		if checksumErr != nil { return checksumErr }
 		if !strings.EqualFold(expected, w.manifest.Checksum) { return fmt.Errorf("manifest checksum mismatch") }
 	}
-	if w.manifest.CheckpointSeq > 0 {
+	if w.manifest.CheckpointSeq > 0 || (w.manifest.Version >= 6 && w.manifest.CheckpointFile != "") {
 		cpPath := checkpointPath(w.opts.Dir, w.manifest.CheckpointSeq)
 		if w.manifest.Version >= 5 {
 			name := w.manifest.CheckpointFile
@@ -114,7 +114,7 @@ func (w *WAL) recover()error{
 			if seq == ^uint64(0) { break }
 		}
 	}
-	if w.manifest.CheckpointSeq > 0 {
+	if w.manifest.CheckpointSeq > 0 || w.manifest.CheckpointFile != "" {
 		cpPath := checkpointPath(w.opts.Dir, w.manifest.CheckpointSeq)
 		if w.manifest.Version >= 5 { cpPath = filepath.Join(w.opts.Dir, w.manifest.CheckpointFile) }
 		raw, readErr := os.ReadFile(cpPath)
@@ -320,7 +320,7 @@ func (w *WAL) Ack(a Ack)error{
 }
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{}
- if w.manifest.CheckpointSeq > 0 {
+ if w.manifest.CheckpointSeq > 0 || w.manifest.CheckpointFile != "" {
   cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq)
   if w.manifest.Version>=5 { cpPath=filepath.Join(w.opts.Dir,w.manifest.CheckpointFile) }
   raw,err:=os.ReadFile(cpPath);if err!=nil{return nil,err}
@@ -404,9 +404,7 @@ func (w *WAL) CheckpointReady()(uint64,error){
 ready:
  target:=candidate-1
  w.mu.Unlock()
- if target>current||needsCompaction{
-  if e=w.Checkpoint(target);e!=nil{return target,e}
- }
+ if e=w.Checkpoint(target);e!=nil{return target,e}
  if e=w.Reclaim();e!=nil{return target,e}
  // ACK reserve is released only as an emergency last-resort write allowance.
  // Retry preallocation after checkpoint compaction/reclaim has freed space.
@@ -470,6 +468,7 @@ func (w *WAL) Checkpoint(seq uint64)error{
  }
  if expectedSnapshot!=w.next{return fmt.Errorf("checkpoint snapshot ends at %d but WAL next sequence is %d",expectedSnapshot-1,w.next-1)}
  cp:=Checkpoint{FormatVersion:2,Seq:seq,CreatedAt:time.Now().UTC(),Pending:pendingSnapshot}
+ if seq==0 && len(pendingSnapshot)==0 && w.manifest.CheckpointFile=="" { return nil }
  if w.manifest.CheckpointSeq==seq && w.manifest.CheckpointFile!="" {
   existingRaw,readErr:=os.ReadFile(filepath.Join(w.opts.Dir,w.manifest.CheckpointFile))
   if readErr==nil {
@@ -556,10 +555,10 @@ func manifestChecksum(m Manifest)(string,error){
 
 func (w *WAL) saveManifest()error{
  next:=w.manifest
- next.Version=5
+ next.Version=6
  next.CheckpointChecksum=""
- if next.CheckpointSeq==0{next.CheckpointFile=""}
- if next.CheckpointSeq>0{
+ if next.CheckpointSeq==0 && next.CheckpointFile==""{next.CheckpointChecksum=""}
+ if next.CheckpointSeq>0 || next.CheckpointFile!=""{
   if next.CheckpointFile==""{next.CheckpointFile=filepath.Base(checkpointPath(w.opts.Dir,next.CheckpointSeq))}
   if filepath.Base(next.CheckpointFile)!=next.CheckpointFile||strings.ContainsAny(next.CheckpointFile,"/\\"){return fmt.Errorf("invalid checkpoint file reference %q",next.CheckpointFile)}
   cpPath:=filepath.Join(w.opts.Dir,next.CheckpointFile)
