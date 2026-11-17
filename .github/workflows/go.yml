@@ -31,7 +31,7 @@ jobs:
       - name: WAL backlog snapshot and recovery benchmark
         run: go test ./internal/reliability/wal -run '^$' -bench '^BenchmarkWALBacklogSnapshotRecovery$' -benchtime=30s -count=1
       - name: Sustained pending backlog checkpoint and restart soak
-        run: WAL_SOAK_DURATION=15s go test ./internal/reliability/wal -run '^TestWALSteadyStateBacklogSoak$' -count=1
+        run: WAL_SOAK_DURATION=15s go test -v ./internal/reliability/wal -run '^TestWALSteadyStateBacklogSoak$' -count=1
       - name: Validate Docker Compose configuration
         run: |
           cp .env.example .env
