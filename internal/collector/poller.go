@@ -16,6 +16,7 @@ import (
 
 type ModbusPoller struct {
 	Config  config.Config
+	Latest  *LatestStore
 	ConfigVersion int64
 	Timeout time.Duration
 	MaxGap  uint16
@@ -99,6 +100,7 @@ func (p *ModbusPoller) Poll(ctx context.Context, d config.Device) ([]Sample, err
 		}
 		if readErr != nil { failures = append(failures, fmt.Errorf("function %d start %d count %d: %w", batch.Function, batch.Start, batch.Count, readErr)) }
 	}
+	if p.Latest != nil { p.Latest.Update(samples) }
 	return samples, errors.Join(failures...)
 }
 
