@@ -25,6 +25,7 @@ type LatestSample struct {
 	Quality Quality    `json:"quality"`
 	Error string       `json:"error,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+	LastSuccess time.Time `json:"last_success,omitempty"`
 }
 
 func NewLatestStore(maxEntries int) *LatestStore {
@@ -41,7 +42,10 @@ func (s *LatestStore) Update(samples []Sample) {
 	for _, sample := range samples {
 		key:=latestKey(sample.DeviceID,sample.PointCode)
 		if element:=s.index[key]; element!=nil {
-			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+			previous:=s.items[key]
+			lastSuccess:=previous.LastSuccess
+			if sample.Quality!=QualityCommError { lastSuccess=sample.Timestamp }
+			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 			s.items[key]=latest
 			s.byDevice[sample.DeviceID][sample.PointCode]=latest
 			s.order.MoveToBack(element)
@@ -57,7 +61,9 @@ func (s *LatestStore) Update(samples []Sample) {
 			if len(s.byDevice[oldSample.DeviceID])==0 { delete(s.byDevice,oldSample.DeviceID) }
 			s.order.Remove(oldest)
 		}
-		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+		lastSuccess:=time.Time{}
+		if sample.Quality!=QualityCommError { lastSuccess=sample.Timestamp }
+		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 		s.items[key]=latest
 		if s.byDevice[sample.DeviceID]==nil { s.byDevice[sample.DeviceID]=make(map[string]LatestSample) }
 		s.byDevice[sample.DeviceID][sample.PointCode]=latest
