@@ -616,3 +616,41 @@ func TestStatsExposeFilesystemUsage(t *testing.T) {
 	}
 	if stats.DiskLevel == "" { t.Fatal("disk pressure level is empty") }
 }
+
+
+func TestReclaimRevalidatesCommittedCheckpointChecksum(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+
+	first, err := w.Append("reclaim-check-1", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	second, err := w.Append("reclaim-check-2", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	for _, record := range []Record{first, second} {
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+		}
+	}
+	if err = w.Checkpoint(second.Seq); err != nil { t.Fatal(err) }
+
+	path := checkpointPath(dir, second.Seq)
+	raw, err := os.ReadFile(path)
+	if err != nil { t.Fatal(err) }
+	var cp Checkpoint
+	if err = json.Unmarshal(raw, &cp); err != nil { t.Fatal(err) }
+	cp.CreatedAt = cp.CreatedAt.Add(time.Second)
+	tampered, err := json.Marshal(cp)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(path, tampered, 0600); err != nil { t.Fatal(err) }
+
+	if err = w.Reclaim(); err == nil || !strings.Contains(err.Error(), "checkpoint checksum mismatch") {
+		t.Fatalf("reclaim should reject tampered checkpoint, got %v", err)
+	}
+	firstSegment := filepath.Join(dir, "data-00000000000000000001.wal")
+	if _, err = os.Stat(firstSegment); err != nil {
+		t.Fatalf("reclaim deleted a segment despite checkpoint checksum failure: %v", err)
+	}
+	if w.manifest.FirstSegment != 1 { t.Fatalf("first segment advanced to %d after failed validation", w.manifest.FirstSegment) }
+}
