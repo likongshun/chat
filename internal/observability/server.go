@@ -116,6 +116,21 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "modbus_wal_segments %d\n", stats.SegmentCount)
 			fmt.Fprintln(w, "# TYPE modbus_wal_checkpoint_sequence gauge")
 			fmt.Fprintf(w, "modbus_wal_checkpoint_sequence %d\n", stats.CheckpointSeq)
+			fmt.Fprintln(w, "# TYPE modbus_wal_fsync_duration_seconds histogram")
+			bounds := []string{"0.001", "0.005", "0.01", "0.025", "0.05", "0.1", "0.25", "1"}
+			var cumulative uint64
+			for i, bound := range bounds {
+				cumulative += stats.Fsync.Buckets[i]
+				fmt.Fprintf(w, "modbus_wal_fsync_duration_seconds_bucket{le=%q} %d\n", bound, cumulative)
+			}
+			cumulative += stats.Fsync.Buckets[len(stats.Fsync.Buckets)-1]
+			fmt.Fprintf(w, "modbus_wal_fsync_duration_seconds_bucket{le=%q} %d\n", "+Inf", cumulative)
+			fmt.Fprintf(w, "modbus_wal_fsync_duration_seconds_sum %f\n", stats.Fsync.Total.Seconds())
+			fmt.Fprintf(w, "modbus_wal_fsync_duration_seconds_count %d\n", stats.Fsync.Count)
+			fmt.Fprintln(w, "# TYPE modbus_wal_fsync_errors_total counter")
+			fmt.Fprintf(w, "modbus_wal_fsync_errors_total %d\n", stats.Fsync.Errors)
+			fmt.Fprintln(w, "# TYPE modbus_wal_fsync_p99_seconds gauge")
+			fmt.Fprintf(w, "modbus_wal_fsync_p99_seconds %f\n", stats.Fsync.P99.Seconds())
 		}
 	}
 	if s.Delivery != nil {
