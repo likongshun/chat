@@ -856,3 +856,21 @@ func TestACKCompactionManifestFailureKeepsNewACKSegmentRecoverable(t *testing.T)
 		t.Fatalf("ACK written after compaction failure was not recovered: %+v", pending)
 	}
 }
+
+
+func TestMissingCommittedACKSegmentPreservesLegacyRecoveryCopy(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	active := ackSegmentPath(dir, w.manifest.AckActiveSegment)
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	if err = os.Remove(active); err != nil { t.Fatal(err) }
+	legacy := filepath.Join(dir, "ack.wal")
+	if err = os.WriteFile(legacy, []byte("legacy recovery copy"), 0600); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil {
+		t.Fatal("missing committed ACK segment must fail closed")
+	}
+	if _, err = os.Stat(legacy); err != nil {
+		t.Fatalf("legacy recovery copy must be preserved on failed migration validation: %v", err)
+	}
+}
