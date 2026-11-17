@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
