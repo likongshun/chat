@@ -23,12 +23,26 @@ func fillFilesystemUntilENOSPC(t *testing.T, mountDir, name string) string {
 		if writeErr != nil { _ = f.Close(); t.Fatalf("fill bounded filesystem: %v", writeErr) }
 		if n != len(block) { _ = f.Close(); t.Fatalf("short filler write: %d/%d", n, len(block)) }
 	}
+	// Buffered writes can report ENOSPC while a small final block remains.
+	// Use fallocate in 64 KiB then 4 KiB units to consume every allocatable block.
+	for _, chunk := range []int64{64 << 10, 4 << 10} {
+		for {
+			info, statErr := f.Stat()
+			if statErr != nil { _ = f.Close(); t.Fatal(statErr) }
+			allocErr := syscall.Fallocate(int(f.Fd()), 0, info.Size(), chunk)
+			if errors.Is(allocErr, syscall.ENOSPC) { break }
+			if allocErr != nil { _ = f.Close(); t.Fatalf("fallocate filler extent: %v", allocErr) }
+		}
+	}
 	syncErr := f.Sync()
 	if syncErr != nil && !errors.Is(syncErr, syscall.ENOSPC) { _ = f.Close(); t.Fatalf("sync filler to force physical allocation: %v", syncErr) }
 	if !errors.Is(syncErr, syscall.ENOSPC) && !writeNoSpace {
 		_ = f.Close()
-		t.Fatal("bounded filesystem did not reach ENOSPC after writing filler")
+		t.Fatal("bounded filesystem did not reach ENOSPC after writing/fallocate filler")
 	}
+	var fs syscall.Statfs_t
+	if statErr := syscall.Statfs(mountDir, &fs); statErr != nil { _ = f.Close(); t.Fatal(statErr) }
+	if fs.Bavail != 0 { _ = f.Close(); t.Fatalf("filesystem still has %d allocatable blocks after fill", fs.Bavail) }
 	if closeErr := f.Close(); closeErr != nil && !errors.Is(closeErr, syscall.ENOSPC) { t.Fatal(closeErr) }
 	return path
 }
