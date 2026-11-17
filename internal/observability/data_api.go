@@ -77,7 +77,8 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	for _,d:=range cfg.Devices {
 		count:=0
 		var seen *time.Time
-		for _,p:=range cfg.Points { if p.Model==d.Model && p.Enabled { count++; if v,ok:=latest[p.PointCode];ok&&(seen==nil||v.Timestamp.After(*seen)){t:=v.Timestamp;seen=&t} } }
+		deviceLatest:=s.Latest.Snapshot(d.ID)
+		for _,p:=range cfg.Points { if p.Model==d.Model && p.Enabled { count++; if v,ok:=deviceLatest[p.PointCode];ok&&(seen==nil||v.Timestamp.After(*seen)){t:=v.Timestamp;seen=&t} } }
 		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:count,LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
@@ -148,7 +149,7 @@ func (s *Server) queryInflux(ctx context.Context,deviceID,pointCode string,from,
 		row:=map[string]string{};for i,v:=range record{if i<len(headers){row[headers[i]]=v}}
 		ts,parseErr:=time.Parse(time.RFC3339Nano,row["_time"]);if parseErr!=nil{continue}
 		value:=parseInfluxValue(row["_value"])
-		out=append(out,telemetryView{DeviceID:deviceID,PointCode:pointCode,Timestamp:ts,Value:value})
+		out=append(out,telemetryView{DeviceID:deviceID,PointCode:pointCode,Timestamp:ts,Value:value,Quality:row["quality"]})
 		if len(out)>=limit{break}
 	}
 	return out,nil
