@@ -91,7 +91,7 @@ A missing segment inside the manifest's required range is a recovery error. Recl
 
 - Data admission enforces a configured WAL byte budget and reserves a separate logical capacity budget for ACK space.
 - On Linux, `statfs` filesystem usage and WAL budget usage produce warning/critical/stop levels at 70%/85%/95%; new Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available.
-- Linux preallocates `ack.reserve` using `fallocate`.
+- Linux preallocates `ack.reserve` using `fallocate`; reserve growth is prepared in a temporary file, synced, atomically renamed, and followed by a directory sync so the previous reserve remains intact until replacement is ready.
 - If reserve allocation returns ENOSPC during open, recovery is still allowed to proceed; ACK durability may remain unavailable until space is freed.
 - On ACK write/sync ENOSPC, the reserve file is released and the ACK operation is retried.
 - The reserve is attempted again on the next process open; automatic reserve replenishment and filesystem-wide watermarks are not yet implemented.
