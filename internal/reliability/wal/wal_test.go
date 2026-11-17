@@ -1221,6 +1221,8 @@ func TestWALCrashHelper(t *testing.T) {
 	switch os.Getenv("WAL_CRASH_MODE") {
 	case "checkpoint":
 		err = w.Checkpoint(1)
+	case "append":
+		_, err = w.Append("data-rotate-crash", json.RawMessage(`{"v":1}`))
 	case "ack":
 		err = w.Ack(Ack{Seq: 1, Sink: "influx", EventID: "crash-event"})
 	case "reclaim":
@@ -1642,5 +1644,34 @@ func TestCheckpointReadyRetriesACKCompactionAfterRestart(t *testing.T) {
 	if _, err = w.CheckpointReady(); err != nil { t.Fatalf("CheckpointReady did not retry ACK compaction: %v", err) }
 	if w.manifest.AckFirstSegment != w.manifest.AckActiveSegment {
 		t.Fatalf("ACK compaction lower boundary was not advanced on retry: %+v", w.manifest)
+	}
+}
+
+
+func TestWALProcessKillDataSegmentRotationBoundaries(t *testing.T) {
+	for _, point := range []string{"data.rotate.segment.durable", "data.rotate.manifest.committed"} {
+		t.Run(point, func(t *testing.T) {
+			dir := t.TempDir()
+			w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+			if err != nil { t.Fatal(err) }
+			if err = w.Close(); err != nil { t.Fatal(err) }
+			runWALCrashProcess(t, dir, "append", point)
+			w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+			if err != nil { t.Fatalf("recover Data rotation crash at %s: %v", point, err) }
+			defer w.Close()
+			pending, err := w.PendingWithAcks()
+			if err != nil { t.Fatal(err) }
+			if len(pending) != 1 || pending[0].Seq != 1 || pending[0].EventID != "data-rotate-crash" {
+				t.Fatalf("Data rotation crash lost appended record: %+v", pending)
+			}
+			if point == "data.rotate.segment.durable" {
+				if w.manifest.ActiveSegment != 1 { t.Fatalf("uncommitted Data segment changed manifest: %+v", w.manifest) }
+				if _, err = os.Stat(filepath.Join(dir, "data-00000000000000000002.wal")); !os.IsNotExist(err) {
+					t.Fatalf("uncommitted Data segment orphan was not cleaned: %v", err)
+				}
+			} else if w.manifest.ActiveSegment != 2 {
+				t.Fatalf("committed Data segment rotation was lost: %+v", w.manifest)
+			}
+		})
 	}
 }
