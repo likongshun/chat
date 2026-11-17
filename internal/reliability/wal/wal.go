@@ -260,12 +260,14 @@ func (w *WAL) rotate() error {
 	if err != nil {
 		return fmt.Errorf("sync directory after creating segment %d: %w", newID, err)
 	}
+	w.crashPoint("data.rotate.segment.durable")
 
 	w.manifest.ActiveSegment = newID
 	if err = w.saveManifest(); err != nil {
 		w.manifest.ActiveSegment = oldID
 		return fmt.Errorf("commit active segment %d: %w", newID, err)
 	}
+	w.crashPoint("data.rotate.manifest.committed")
 
 	// MANIFEST is now durable. Switch handles only after the commit.
 	if err = w.data.Close(); err != nil {
@@ -276,6 +278,7 @@ func (w *WAL) rotate() error {
 	if err = w.openDataOnly(); err != nil {
 		return fmt.Errorf("manifest committed to segment %d but opening it failed: %w", newID, err)
 	}
+	w.crashPoint("data.rotate.handle.switched")
 	return nil
 }
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
