@@ -815,3 +815,43 @@ func TestOpenFailsClosedWhenCommittedACKSegmentIsMissing(t *testing.T) {
 		t.Fatal("missing committed ACK segment must fail closed")
 	}
 }
+
+
+func TestACKCompactionManifestFailureKeepsNewACKSegmentRecoverable(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	first, err := w.Append("compact-fault-first", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	second, err := w.Append("compact-fault-second", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+	}
+	calls := 0
+	w.manifestCommitHook = func(Manifest) error {
+		calls++
+		if calls == 3 { return errors.New("injected second ACK-boundary commit failure") }
+		return nil
+	}
+	if err = w.Checkpoint(first.Seq); err == nil {
+		t.Fatal("expected injected ACK lower-boundary commit failure")
+	}
+	if w.manifest.AckActiveSegment <= w.manifest.AckFirstSegment {
+		t.Fatalf("failed second commit must retain the extended ACK range: %+v", w.manifest)
+	}
+	if w.ack == nil { t.Fatal("new active ACK segment must remain writable") }
+	if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil {
+		t.Fatalf("ACK must remain available on the new segment after compaction failure: %v", err)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("reopen after uncertain ACK compaction: %v", err) }
+	defer reopened.Close()
+	pending, err := reopened.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 1 || pending[0].Seq != second.Seq || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+		t.Fatalf("ACK written after compaction failure was not recovered: %+v", pending)
+	}
+}
