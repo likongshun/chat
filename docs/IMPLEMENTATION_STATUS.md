@@ -46,7 +46,7 @@ Remaining WAL/delivery gaps:
 - ACK WAL is still a single file, not segmented.
 - Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
 - Manifest v3 SHA-256 checksum binds the exact checkpoint payload bytes; v1/v2 manifests remain readable and are upgraded on the next successful metadata commit. Explicit checkpoint filename/reference fields are not implemented.
-- Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Filesystem-wide warning/critical/stop watermarks are not implemented. Basic WAL capacity rejection, disk usage, pending and segment metrics are exposed.
+- Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Linux `statfs` and WAL-budget pressure levels expose warning/critical/stop at 70%/85%/95%; Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available. Filesystem usage and pressure level are exported to Prometheus.
 - Unified fsync histogram/error/P99 telemetry is implemented across WAL data, ACK, checkpoint, manifest, reserve, and directory sync paths; process-kill and real disk-full fault injection remain incomplete.
 - MQTT, InfluxDB and PostgreSQL integration tests are included in the Compose-backed CI job; physical-device and production-filesystem tests are still required.
 - Do not claim production durability until these gaps and target-filesystem fault tests are closed.
