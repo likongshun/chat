@@ -1569,3 +1569,46 @@ func TestWALProcessKillAfterACKCompactionBoundaryAndDuringPartialDeletion(t *tes
 		}
 	})
 }
+
+
+func TestWALProcessKillCleansUncommittedMetadataTemps(t *testing.T) {
+	t.Run("manifest temp synced before rename", func(t *testing.T) {
+		dir := t.TempDir()
+		prepareCrashCheckpointWAL(t, dir, 1<<20)
+		runWALCrashProcess(t, dir, "checkpoint", "manifest.tmp.synced")
+		w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.CheckpointSeq != 0 { t.Fatalf("unrenamed manifest temp changed committed state: %+v", w.manifest) }
+		for _, path := range []string{filepath.Join(dir, "MANIFEST.tmp"), checkpointPath(dir, 1)} {
+			if _, err = os.Stat(path); !os.IsNotExist(err) { t.Fatalf("uncommitted metadata temp/orphan remains at %s: %v", path, err) }
+		}
+	})
+
+	t.Run("ACK compact temp synced before rename", func(t *testing.T) {
+		dir := t.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		first, err := w.Append("crash-event", json.RawMessage(`{"v":1}`))
+		if err != nil { t.Fatal(err) }
+		second, err := w.Append("crash-event-2", json.RawMessage(`{"v":2}`))
+		if err != nil { t.Fatal(err) }
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+		}
+		if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "checkpoint", "ack.compact.segment.durable")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		pending, err := w.PendingWithAcks()
+		if err != nil { t.Fatal(err) }
+		if len(pending) != 1 || pending[0].Seq != 2 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+			t.Fatalf("ACK state changed after compact-temp crash: %+v", pending)
+		}
+		if _, err = os.Stat(ackSegmentPath(dir, 4)+".tmp"); !os.IsNotExist(err) {
+			t.Fatalf("uncommitted ACK compaction temp remains: %v", err)
+		}
+	})
+}
