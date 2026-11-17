@@ -7,6 +7,7 @@ import (
  "os"
  "path/filepath"
  "strings"
+ "sync"
  "testing"
  "time"
 )
@@ -983,4 +984,38 @@ func TestManifestV5RejectsCheckpointPathTraversal(t *testing.T) {
 	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil || !strings.Contains(err.Error(), "invalid manifest checkpoint file reference") {
 		t.Fatalf("unsafe checkpoint reference must be rejected on load, got %v", err)
 	}
+}
+
+
+func TestACKReserveReplenishmentSerializesWithConcurrentACK(t *testing.T) {
+	w, err := Open(Options{Dir: t.TempDir(), SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	first, err := w.Append("reserve-sync-first", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	second, err := w.Append("reserve-sync-second", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5; i++ {
+			if _, err := w.CheckpointReady(); err != nil { errs <- err; return }
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		ack := Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}
+		for i := 0; i < 5; i++ {
+			if err := w.Ack(ack); err != nil { errs <- err; return }
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs { t.Fatal(err) }
 }
