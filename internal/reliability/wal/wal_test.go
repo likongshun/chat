@@ -448,7 +448,7 @@ func TestCheckpointReadyReplenishesACKReserve(t *testing.T) {
 }
 
 
-func TestManifestV3ChecksumRejectsTampering(t *testing.T) {
+func TestManifestV5ChecksumRejectsTampering(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
@@ -460,7 +460,7 @@ func TestManifestV3ChecksumRejectsTampering(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var m Manifest
 	if err = json.Unmarshal(raw, &m); err != nil { t.Fatal(err) }
-	if m.Version != 4 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
+	if m.Version != 5 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
 	m.Checksum = strings.Repeat("0", len(m.Checksum))
 	tampered, err := json.Marshal(m)
 	if err != nil { t.Fatal(err) }
@@ -498,7 +498,7 @@ func TestManifestRejectsTamperedCheckpointPayload(t *testing.T) {
 }
 
 
-func TestManifestV2UpgradesToV3OnCommit(t *testing.T) {
+func TestManifestV2UpgradesToV5OnOpen(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
@@ -517,13 +517,13 @@ func TestManifestV2UpgradesToV3OnCommit(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 4 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 5 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
 	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
-	if err != nil { t.Fatalf("reopen v4 manifest: %v", err) }
+	if err != nil { t.Fatalf("reopen v5 manifest: %v", err) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
 }
 
-func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
+func TestLegacyManifestUpgradesToV5OnOpen(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
 	if err := os.WriteFile(filepath.Join(dir, "data-00000000000000000001.wal"), nil, 0600); err != nil { t.Fatal(err) }
@@ -540,7 +540,7 @@ func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 4 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 5 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
 	reopened, reopenErr := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
@@ -752,7 +752,7 @@ func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
 	defer w.Close()
-	if w.manifest.Version != 4 || w.manifest.AckFirstSegment != 1 || w.manifest.AckActiveSegment != 1 {
+	if w.manifest.Version != 5 || w.manifest.AckFirstSegment != 1 || w.manifest.AckActiveSegment != 1 {
 		t.Fatalf("legacy manifest was not migrated: %+v", w.manifest)
 	}
 	if _, err = os.Stat(legacy); !os.IsNotExist(err) {
