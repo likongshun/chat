@@ -51,25 +51,25 @@ func (s *segmentLog) Append(payload []byte, syncWrite bool) error {
 		if err = s.Rotate(); err != nil { return err }
 	}
 	if err = writeFrame(s.file, payload); err != nil { return err }
-	if syncWrite { return s.file.Sync() }
+	if syncWrite { return s.syncFile(file) }
 	return nil
 }
 
 func (s *segmentLog) Rotate() error {
 	if s.file == nil { return os.ErrClosed }
-	if err := s.file.Sync(); err != nil { return err }
+	if err := s.syncFile(file); err != nil { return err }
 	if err := s.file.Close(); err != nil { return err }
 	s.currentID++
 	if err := s.openCurrent(); err != nil { return err }
 	d, err := os.Open(s.dir)
 	if err != nil { return err }
 	defer d.Close()
-	return d.Sync()
+	return syncFile(d)
 }
 
 func (s *segmentLog) Sync() error {
 	if s.file == nil { return os.ErrClosed }
-	return s.file.Sync()
+	return s.syncFile(file)
 }
 
 func (s *segmentLog) Close() error {
