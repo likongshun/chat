@@ -43,7 +43,7 @@ Repository: `https://github.com/likongshun/chat`
 - Collector command now starts Modbus polling, WAL persistence, and downstream delivery when InfluxDB credentials are configured.
 
 Remaining WAL/delivery gaps:
-- ACK WAL is still a single file, not segmented.
+- ACK WAL uses Manifest v4-managed numbered segments. Legacy `ack.wal` is copied and synced into ACK segment 1 before the Manifest migration commit; the legacy file is removed only afterward. Rotation publishes and syncs the next segment before updating the Manifest. Checkpoint compaction writes a fresh retained-ACK segment, syncs it, commits new ACK boundaries, and only then removes obsolete segments. Recovery removes uncommitted or obsolete ACK segment orphans and fails closed when a committed ACK segment is missing.
 - Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
 - Manifest v3 SHA-256 checksum binds the exact checkpoint payload bytes; v1/v2 manifests remain readable and are upgraded on the next successful metadata commit. Explicit checkpoint filename/reference fields are not implemented.
 - Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Linux `statfs` and WAL-budget pressure levels expose warning/critical/stop at 70%/85%/95%; Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available. Filesystem usage and pressure level are exported to Prometheus.
@@ -76,7 +76,7 @@ Remaining WAL/delivery gaps:
 
 ## Remaining work
 
-1. Finish WAL checksum/migration, segmented ACK WAL, reserve replenishment, capacity watermarks, fsync instrumentation, and crash/disk-full fault tests.
+1. Finish WAL migration validation, complete process-kill crash and real disk-full/reserve-exhaustion fault tests, and long-running storage benchmarks.
 2. Add PostgreSQL configuration/version storage, Excel import transactions, immutable snapshots, and safe hot reload.
 3. Add device leases/sharding for multi-instance collection.
 4. Expand Prometheus fsync/capacity metrics, structured logs, production Compose profile, MQTT authentication/TLS and Docker secrets.
