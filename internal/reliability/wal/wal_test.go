@@ -446,7 +446,7 @@ func TestCheckpointReadyReplenishesACKReserve(t *testing.T) {
 }
 
 
-func TestManifestV2ChecksumRejectsTampering(t *testing.T) {
+func TestManifestV3ChecksumRejectsTampering(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
@@ -458,7 +458,7 @@ func TestManifestV2ChecksumRejectsTampering(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var m Manifest
 	if err = json.Unmarshal(raw, &m); err != nil { t.Fatal(err) }
-	if m.Version != 2 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
+	if m.Version != 3 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
 	m.Checksum = strings.Repeat("0", len(m.Checksum))
 	tampered, err := json.Marshal(m)
 	if err != nil { t.Fatal(err) }
@@ -512,7 +512,7 @@ func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 2 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 3 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
 	reopened, reopenErr := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
