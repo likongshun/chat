@@ -468,6 +468,33 @@ func TestManifestV2ChecksumRejectsTampering(t *testing.T) {
 	}
 }
 
+
+func TestManifestRejectsTamperedCheckpointPayload(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	record, err := w.Append("checkpoint-integrity", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: sink, EventID: record.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	path := checkpointPath(dir, record.Seq)
+	raw, err := os.ReadFile(path)
+	if err != nil { t.Fatal(err) }
+	var cp Checkpoint
+	if err = json.Unmarshal(raw, &cp); err != nil { t.Fatal(err) }
+	cp.CreatedAt = cp.CreatedAt.Add(time.Second)
+	tampered, err := json.Marshal(cp)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(path, tampered, 0600); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil || !strings.Contains(err.Error(), "checkpoint checksum mismatch") {
+		t.Fatalf("expected checkpoint checksum rejection, got %v", err)
+	}
+}
+
 func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
@@ -486,7 +513,7 @@ func TestLegacyManifestUpgradesToV2OnCommit(t *testing.T) {
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
 	if upgraded.Version != 2 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
-	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err != nil {
-		t.Fatalf("reopen upgraded manifest: %v", err)
-	}
+	reopened, reopenErr := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
+	if err = reopened.Close(); err != nil { t.Fatal(err) }
 }
