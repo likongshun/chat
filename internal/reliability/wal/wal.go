@@ -463,7 +463,10 @@ func (w *WAL) saveManifest()error{
   if filepath.Base(next.CheckpointFile)!=next.CheckpointFile||strings.ContainsAny(next.CheckpointFile,"/\\"){return fmt.Errorf("invalid checkpoint file reference %q",next.CheckpointFile)}
   cpPath:=filepath.Join(w.opts.Dir,next.CheckpointFile)
   cp,e:=os.ReadFile(cpPath)
-  if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))}
+  if os.IsNotExist(e)&&w.manifest.Version<5{
+   cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))
+   if e==nil{if copyErr:=atomicFile(cpPath,cp);copyErr!=nil{return fmt.Errorf("migrate legacy checkpoint file reference: %w",copyErr)}}
+  }
   if e!=nil{return fmt.Errorf("read checkpoint for manifest commit: %w",e)}
   sum:=sha256.Sum256(cp)
   next.CheckpointChecksum=hex.EncodeToString(sum[:])
