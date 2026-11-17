@@ -136,3 +136,84 @@ func (w *WAL) cleanupObsoleteAckSegments() error {
 	}
 	return nil
 }
+
+func (w *WAL) rotateAckSegment() error {
+	if w.manifest.AckActiveSegment == ^uint64(0) {
+		return fmt.Errorf("ACK segment sequence exhausted")
+	}
+	oldID := w.manifest.AckActiveSegment
+	newID := oldID + 1
+	path := ackSegmentPath(w.opts.Dir, newID)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	if os.IsExist(err) {
+		f, err = os.OpenFile(path, os.O_RDWR, 0600)
+		if err != nil { return err }
+		st, statErr := f.Stat()
+		if statErr != nil { _ = f.Close(); return statErr }
+		if st.Size() != 0 { _ = f.Close(); return fmt.Errorf("orphan ACK segment %d is not empty", newID) }
+	}
+	if err = syncFile(f); err != nil { _ = f.Close(); return err }
+	if err = f.Close(); err != nil { return err }
+	d, err := os.Open(w.opts.Dir)
+	if err != nil { return err }
+	err = syncFile(d)
+	_ = d.Close()
+	if err != nil { return fmt.Errorf("sync directory after ACK segment creation: %w", err) }
+
+	w.manifest.AckActiveSegment = newID
+	if err = w.saveManifest(); err != nil {
+		w.manifest.AckActiveSegment = oldID
+		return fmt.Errorf("commit ACK segment %d: %w", newID, err)
+	}
+	if w.ack != nil {
+		if err = w.ack.Close(); err != nil { w.ack = nil; return err }
+	}
+	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	if err != nil { return err }
+	return nil
+}
+
+func (w *WAL) compactAckSegments(boundary uint64) error {
+	if w.manifest.AckActiveSegment == ^uint64(0) {
+		return fmt.Errorf("ACK segment sequence exhausted")
+	}
+	newID := w.manifest.AckActiveSegment + 1
+	path := ackSegmentPath(w.opts.Dir, newID)
+	tmpPath := path + ".tmp"
+	tmp, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil { return err }
+	keepErr := readAckFrames(w.opts.Dir, w.manifest, func(b []byte) error {
+		var ack Ack
+		if err := json.Unmarshal(b, &ack); err != nil { return err }
+		if ack.Seq > boundary { return writeFrame(tmp, b) }
+		return nil
+	})
+	if keepErr != nil { _ = tmp.Close(); _ = os.Remove(tmpPath); return keepErr }
+	if err = syncFile(tmp); err != nil { _ = tmp.Close(); _ = os.Remove(tmpPath); return err }
+	if err = tmp.Close(); err != nil { _ = os.Remove(tmpPath); return err }
+	if err = os.Rename(tmpPath, path); err != nil { _ = os.Remove(tmpPath); return err }
+	d, err := os.Open(w.opts.Dir)
+	if err != nil { return err }
+	err = syncFile(d)
+	_ = d.Close()
+	if err != nil { return err }
+
+	oldFirst, oldActive := w.manifest.AckFirstSegment, w.manifest.AckActiveSegment
+	w.manifest.AckFirstSegment, w.manifest.AckActiveSegment = newID, newID
+	if err = w.saveManifest(); err != nil {
+		w.manifest.AckFirstSegment, w.manifest.AckActiveSegment = oldFirst, oldActive
+		return fmt.Errorf("commit compacted ACK segment: %w", err)
+	}
+
+	if w.ack != nil {
+		closeErr := w.ack.Close()
+		w.ack = nil
+		if closeErr != nil { return closeErr }
+	}
+	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	if err != nil { return err }
+	return w.cleanupObsoleteAckSegments()
+}
