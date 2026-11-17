@@ -29,7 +29,6 @@ func (w *WAL) prepareInitialDataSegment() error {
 	}
 	if err = syncFile(f); err != nil { _ = f.Close(); return err }
 	if err = f.Close(); err != nil { return err }
-	w.crashPoint("ack.rotate.segment.durable")
 	d, err := os.Open(w.opts.Dir)
 	if err != nil { return err }
 	err = syncFile(d)
@@ -203,6 +202,7 @@ func (w *WAL) rotateAckSegment() error {
 	}
 	if err = syncFile(f); err != nil { _ = f.Close(); return err }
 	if err = f.Close(); err != nil { return err }
+	w.crashPoint("ack.rotate.segment.durable")
 	d, err := os.Open(w.opts.Dir)
 	if err != nil { return err }
 	err = syncFile(d)
