@@ -5,6 +5,7 @@ import (
  "fmt"
  "errors"
  "os"
+ "os/exec"
  "path/filepath"
  "strings"
  "sync"
@@ -1206,4 +1207,158 @@ func TestCheckpointSnapshotRejectsDataMismatch(t *testing.T) {
 		t.Fatal("recovery must reject a checkpoint payload that differs from the retained Data WAL")
 	}
 	_ = record
+}
+
+
+func TestWALCrashHelper(t *testing.T) {
+	if os.Getenv("WAL_CRASH_HELPER") != "1" { return }
+	dir := os.Getenv("WAL_CRASH_DIR")
+	point := os.Getenv("WAL_CRASH_POINT")
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { os.Exit(81) }
+	w.faultHook = func(name string) { if name == point { os.Exit(86) } }
+	switch os.Getenv("WAL_CRASH_MODE") {
+	case "checkpoint":
+		err = w.Checkpoint(1)
+	case "ack":
+		err = w.Ack(Ack{Seq: 1, Sink: "influx", EventID: "crash-event"})
+	case "reclaim":
+		err = w.Reclaim()
+	default:
+		os.Exit(82)
+	}
+	if err != nil { os.Exit(83) }
+	os.Exit(84)
+}
+
+func runWALCrashProcess(t *testing.T, dir, mode, point string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWALCrashHelper$")
+	cmd.Env = append(os.Environ(),
+		"WAL_CRASH_HELPER=1",
+		"WAL_CRASH_DIR="+dir,
+		"WAL_CRASH_MODE="+mode,
+		"WAL_CRASH_POINT="+point,
+	)
+	output, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 86 {
+		t.Fatalf("child did not terminate at crash point %q: err=%v output=%s", point, err, output)
+	}
+}
+
+func prepareCrashCheckpointWAL(t *testing.T, dir string, segmentBytes int64) {
+	t.Helper()
+	w, err := Open(Options{Dir: dir, SegmentBytes: segmentBytes, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	first, err := w.Append("crash-event", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+}
+
+func TestWALProcessKillCheckpointManifestAndACKRotationBoundaries(t *testing.T) {
+	t.Run("checkpoint file durable before manifest", func(t *testing.T) {
+		dir := t.TempDir()
+		prepareCrashCheckpointWAL(t, dir, 1<<20)
+		runWALCrashProcess(t, dir, "checkpoint", "checkpoint.file.durable")
+		w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.CheckpointSeq != 0 { t.Fatalf("uncommitted checkpoint advanced manifest: %+v", w.manifest) }
+		if _, err = os.Stat(checkpointPath(dir, 1)); !os.IsNotExist(err) {
+			t.Fatalf("uncommitted checkpoint generation was not cleaned: %v", err)
+		}
+	})
+
+	t.Run("manifest renamed before directory sync", func(t *testing.T) {
+		dir := t.TempDir()
+		prepareCrashCheckpointWAL(t, dir, 1<<20)
+		runWALCrashProcess(t, dir, "checkpoint", "manifest.renamed")
+		w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatalf("recovery after uncertain manifest rename: %v", err) }
+		defer w.Close()
+		if w.manifest.CheckpointSeq > 1 { t.Fatalf("manifest advanced beyond operation: %+v", w.manifest) }
+		pending, err := w.PendingWithAcks()
+		if err != nil { t.Fatal(err) }
+		if len(pending) != 0 { t.Fatalf("fully ACKed event unexpectedly pending after recovery: %+v", pending) }
+	})
+
+	t.Run("checkpoint manifest committed", func(t *testing.T) {
+		dir := t.TempDir()
+		prepareCrashCheckpointWAL(t, dir, 1<<20)
+		runWALCrashProcess(t, dir, "checkpoint", "checkpoint.manifest.committed")
+		w, err := Open(Options{Dir: dir, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.CheckpointSeq != 1 { t.Fatalf("committed checkpoint lost: %+v", w.manifest) }
+	})
+
+	t.Run("ACK segment created before manifest", func(t *testing.T) {
+		dir := t.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		record, err := w.Append("crash-event", json.RawMessage(`{"v":1}`))
+		if err != nil { t.Fatal(err) }
+		if err = w.Ack(Ack{Seq: record.Seq, Sink: "mqtt", EventID: record.EventID}); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "ack", "ack.rotate.segment.durable")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		pending, err := w.PendingWithAcks()
+		if err != nil { t.Fatal(err) }
+		if len(pending) != 1 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+			t.Fatalf("ACK rotation crash lost or invented ACK state: %+v", pending)
+		}
+		if _, err = os.Stat(ackSegmentPath(dir, 2)); !os.IsNotExist(err) {
+			t.Fatalf("uncommitted ACK segment orphan was not removed: %v", err)
+		}
+	})
+}
+
+func TestWALProcessKillACKCompactionAndReclaimBoundaries(t *testing.T) {
+	t.Run("ACK compaction after first manifest commit", func(t *testing.T) {
+		dir := t.TempDir()
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		first, err := w.Append("crash-event", json.RawMessage(`{"v":1}`))
+		if err != nil { t.Fatal(err) }
+		second, err := w.Append("crash-event-2", json.RawMessage(`{"v":2}`))
+		if err != nil { t.Fatal(err) }
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+		}
+		if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "checkpoint", "ack.compact.manifest.expanded")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.CheckpointSeq != 1 { t.Fatalf("checkpoint boundary lost after ACK compaction crash: %+v", w.manifest) }
+		pending, err := w.PendingWithAcks()
+		if err != nil { t.Fatal(err) }
+		if len(pending) != 1 || pending[0].Seq != 2 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+			t.Fatalf("ACK compaction crash lost independent ACK state: %+v", pending)
+		}
+	})
+
+	t.Run("reclaim manifest committed before unlink", func(t *testing.T) {
+		dir := t.TempDir()
+		prepareCrashCheckpointWAL(t, dir, 1)
+		w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		if err = w.Checkpoint(1); err != nil { t.Fatal(err) }
+		if err = w.Close(); err != nil { t.Fatal(err) }
+		runWALCrashProcess(t, dir, "reclaim", "data.reclaim.manifest.committed")
+		w, err = Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 8 << 20, ReserveBytes: 4096, Sync: true})
+		if err != nil { t.Fatal(err) }
+		defer w.Close()
+		if w.manifest.FirstSegment < 2 { t.Fatalf("reclaim boundary was not recovered: %+v", w.manifest) }
+		if _, err = os.Stat(filepath.Join(dir, "data-00000000000000000001.wal")); !os.IsNotExist(err) {
+			t.Fatalf("recovery did not finish committed Data segment deletion: %v", err)
+		}
+	})
 }
