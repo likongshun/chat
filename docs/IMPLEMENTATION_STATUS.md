@@ -44,10 +44,10 @@ Repository: `https://github.com/likongshun/chat`
 
 Remaining WAL/delivery gaps:
 - ACK WAL uses Manifest v6-managed numbered segments. Legacy `ack.wal` is copied and synced into ACK segment 1 before the Manifest migration commit; the legacy file is removed only afterward. Rotation publishes and syncs the next segment before updating the Manifest. Checkpoint compaction writes a fresh retained-ACK segment, syncs it, commits new ACK boundaries, and only then removes obsolete segments. Recovery removes uncommitted or obsolete ACK segment orphans and fails closed when a committed ACK segment is missing.
-- Checkpoint sequence remains the fully ACKed contiguous prefix; Manifest v6 additionally snapshots the complete pending suffix and each sink's independent ACK state.
+- Checkpoint sequence remains the fully ACKed contiguous prefix; Manifest v6 additionally snapshots the complete pending suffix and each sink's independent ACK state, including a sequence-zero initial backlog snapshot.
 - Manifest v6 binds an explicit checkpoint filename (including valid sequence-zero snapshots) and SHA-256 of the exact payload bytes, in addition to the Manifest checksum and Data/ACK segment boundaries. Checkpoint v2 snapshots every not-fully-ACKed retained record above the fully acknowledged prefix, including payload and independent MQTT/Influx ACK flags. Same-prefix state changes use immutable checkpoint generations. Versions 1–5 remain readable and are upgraded during safe open/migration. Formal operator-facing migration tooling remains outstanding.
 - Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Linux `statfs` and WAL-budget pressure levels expose warning/critical/stop at 70%/85%/95%; Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available. Filesystem usage and pressure level are exported to Prometheus.
-- Unified fsync histogram/error/P99 telemetry is implemented across WAL data, ACK, checkpoint, manifest, reserve, and directory sync paths. Subprocess crash tests now exercise checkpoint publication, uncertain Manifest rename, ACK segment rotation/compaction, and reclaim commit boundaries. Injected ENOSPC tests verify reserve release, torn-tail repair, ACK retry, and fail-closed reserve exhaustion; physical filesystem-full testing remains outstanding.
+- Unified fsync histogram/error/P99 telemetry is implemented across WAL data, ACK, checkpoint, manifest, reserve, and directory sync paths. Subprocess crash tests now exercise checkpoint publication, uncertain Manifest rename, ACK segment rotation/compaction, and reclaim commit boundaries. Injected ENOSPC tests verify reserve release, torn-tail repair, ACK retry, and fail-closed reserve exhaustion. A disposable ext4 loopback CI filesystem is filled to zero allocatable blocks; the test verifies Data admission stops, ACK consumes the reserve, checkpoint/reclaim completes, and ACK durability fails closed after reserve exhaustion.
 - MQTT, InfluxDB and PostgreSQL integration tests are included in the Compose-backed CI job; physical-device and production-filesystem tests are still required.
 - Do not claim production durability until these gaps and target-filesystem fault tests are closed.
 
@@ -74,11 +74,11 @@ Remaining WAL/delivery gaps:
 - Commit `d422391444e051dd9e55498a3dac1c53a287fd92` passed the same suite with concurrent ACK writes and ACK reserve replenishment coverage (run `44016094424`).
 - Unit tests cover WAL locking, ACK identity and idempotency, legacy ACK migration, ACK segment rotation and two-phase compaction, compaction manifest-failure recovery, checkpoint checksums and explicit references, path traversal rejection, torn-tail recovery, Data/ACK orphan cleanup, missing committed segment fail-closed behavior, sequence continuity, and per-sink delivery state.
 - The newest Data-orphan recovery and checkpoint migration additions have their own CI runs; verify their final conclusions before release.
-- No physical Modbus device test, full process-kill fault matrix, real disk-full test, or 5,000-device load test has been completed.
+- No physical Modbus device test, multi-hour production-filesystem soak, or 5,000-device load test has been completed.
 
 ## Remaining work
 
-1. Finish CI validation of the new pending checkpoint and process-kill tests; run real filesystem-full/reserve-exhaustion tests on the deployment filesystem and long-running storage benchmarks.
+1. Run multi-hour backlog/recovery soaks and repeat the ext4 crash/ENOSPC matrix on the actual deployment filesystem; validate reserve sizing, inode/quota exhaustion, and alert thresholds.
 2. Implement automatic configuration hot reload and an administrative import/activation API.
 3. Add device leases/sharding for multi-instance collection.
 4. Expand structured logs and production Compose hardening; configure MQTT authentication, ACL/TLS, and Docker secrets.
