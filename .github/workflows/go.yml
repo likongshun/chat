@@ -43,22 +43,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /mnt/modbus-wal-fs
           echo "WAL_REAL_DISK_FULL_DIR=/mnt/modbus-wal-fs" >> "$GITHUB_ENV"
       - name: Test real filesystem-full ACK reserve behavior
-        run: go test ./internal/reliability/wal -run '^TestWALRealFilesystemFullACKReserve      - name: Start PostgreSQL, MQTT and InfluxDB integration services
-        run: docker compose up -d --wait postgres mqtt influxdb
-      - name: Test PostgreSQL configuration, MQTT QoS 1 and InfluxDB v2
-        run: |
-          INFLUX_TEST_TOKEN="$(sed -n 's/^INFLUXDB_ADMIN_TOKEN=//p' .env)" \
-          POSTGRES_TEST_DSN="postgres://modbus:$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)@127.0.0.1:5432/modbus?sslmode=disable" \
-          MQTT_TEST_BROKER=tcp://127.0.0.1:1883 \
-          INFLUX_TEST_URL=http://127.0.0.1:8086 \
-          INFLUX_TEST_ORG=modbus \
-          INFLUX_TEST_BUCKET=telemetry \
-          go test ./internal/pipeline ./internal/configstore -run 'TestMQTTSinkQoS1Integration|TestInfluxSinkIntegration|TestPostgresConfigVersionImportAndActivate' -count=1
-      - name: Stop integration services
-        if: always()
-        run: |
-          if [ -f .env ]; then docker compose down; fi
- -count=1
+        run: go test ./internal/reliability/wal -run '^TestWALRealFilesystemFullACKReserve$' -count=1
       - name: Unmount bounded WAL fault-test filesystem
         if: always()
         run: sudo umount /mnt/modbus-wal-fs || true
