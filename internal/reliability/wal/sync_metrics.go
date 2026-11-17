@@ -33,6 +33,12 @@ func syncFile(f *os.File) error {
 	if err != nil {
 		processFsyncMetrics.errors.Add(1)
 	}
+	for {
+		old := processFsyncMetrics.maxNanos.Load()
+		if nanos <= old || processFsyncMetrics.maxNanos.CompareAndSwap(old, nanos) {
+			break
+		}
+	}
 	for i, bound := range fsyncBucketBounds {
 		if elapsed <= bound {
 			processFsyncMetrics.buckets[i].Add(1)
@@ -40,12 +46,6 @@ func syncFile(f *os.File) error {
 		}
 	}
 	processFsyncMetrics.buckets[len(fsyncBucketBounds)].Add(1)
-	for {
-		old := processFsyncMetrics.maxNanos.Load()
-		if nanos <= old || processFsyncMetrics.maxNanos.CompareAndSwap(old, nanos) {
-			break
-		}
-	}
 	return err
 }
 
