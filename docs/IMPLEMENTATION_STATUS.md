@@ -43,11 +43,11 @@ Repository: `https://github.com/likongshun/chat`
 - Collector command now starts Modbus polling, WAL persistence, and downstream delivery when InfluxDB credentials are configured.
 
 Remaining WAL/delivery gaps:
-- ACK WAL uses Manifest v5-managed numbered segments. Legacy `ack.wal` is copied and synced into ACK segment 1 before the Manifest migration commit; the legacy file is removed only afterward. Rotation publishes and syncs the next segment before updating the Manifest. Checkpoint compaction writes a fresh retained-ACK segment, syncs it, commits new ACK boundaries, and only then removes obsolete segments. Recovery removes uncommitted or obsolete ACK segment orphans and fails closed when a committed ACK segment is missing.
-- Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
-- Manifest v5 binds an explicit checkpoint filename and SHA-256 of the exact payload bytes, in addition to the Manifest checksum and Data/ACK segment boundaries. Versions 1–4 remain readable and are upgraded during safe open/migration. Formal operator-facing migration tooling and a complete pending-record checkpoint snapshot remain outstanding.
+- ACK WAL uses Manifest v6-managed numbered segments. Legacy `ack.wal` is copied and synced into ACK segment 1 before the Manifest migration commit; the legacy file is removed only afterward. Rotation publishes and syncs the next segment before updating the Manifest. Checkpoint compaction writes a fresh retained-ACK segment, syncs it, commits new ACK boundaries, and only then removes obsolete segments. Recovery removes uncommitted or obsolete ACK segment orphans and fails closed when a committed ACK segment is missing.
+- Checkpoint sequence remains the fully ACKed contiguous prefix; Manifest v6 additionally snapshots the complete pending suffix and each sink's independent ACK state.
+- Manifest v6 binds an explicit checkpoint filename (including valid sequence-zero snapshots) and SHA-256 of the exact payload bytes, in addition to the Manifest checksum and Data/ACK segment boundaries. Checkpoint v2 snapshots every not-fully-ACKed retained record above the fully acknowledged prefix, including payload and independent MQTT/Influx ACK flags. Same-prefix state changes use immutable checkpoint generations. Versions 1–5 remain readable and are upgraded during safe open/migration. Formal operator-facing migration tooling remains outstanding.
 - Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Linux `statfs` and WAL-budget pressure levels expose warning/critical/stop at 70%/85%/95%; Data admission stops at 95% or earlier at the configured WAL budget/reserve boundary, while ACK and reclaim remain available. Filesystem usage and pressure level are exported to Prometheus.
-- Unified fsync histogram/error/P99 telemetry is implemented across WAL data, ACK, checkpoint, manifest, reserve, and directory sync paths; process-kill and real disk-full fault injection remain incomplete.
+- Unified fsync histogram/error/P99 telemetry is implemented across WAL data, ACK, checkpoint, manifest, reserve, and directory sync paths. Subprocess crash tests now exercise checkpoint publication, uncertain Manifest rename, ACK segment rotation/compaction, and reclaim commit boundaries. Injected ENOSPC tests verify reserve release, torn-tail repair, ACK retry, and fail-closed reserve exhaustion; physical filesystem-full testing remains outstanding.
 - MQTT, InfluxDB and PostgreSQL integration tests are included in the Compose-backed CI job; physical-device and production-filesystem tests are still required.
 - Do not claim production durability until these gaps and target-filesystem fault tests are closed.
 
@@ -78,7 +78,7 @@ Remaining WAL/delivery gaps:
 
 ## Remaining work
 
-1. Complete the pending-record checkpoint snapshot design, process-kill crash matrix, real disk-full/reserve-exhaustion tests, and long-running storage benchmarks.
+1. Finish CI validation of the new pending checkpoint and process-kill tests; run real filesystem-full/reserve-exhaustion tests on the deployment filesystem and long-running storage benchmarks.
 2. Implement automatic configuration hot reload and an administrative import/activation API.
 3. Add device leases/sharding for multi-instance collection.
 4. Expand structured logs and production Compose hardening; configure MQTT authentication, ACL/TLS, and Docker secrets.
