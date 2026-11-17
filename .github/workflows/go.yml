@@ -29,7 +29,7 @@ jobs:
       - name: Race tests
         run: go test -race ./...
       - name: WAL backlog snapshot and recovery benchmark
-        run: go test ./internal/reliability/wal -run '^$' -bench '^BenchmarkWALBacklogSnapshotRecovery$' -benchtime=5s -count=1
+        run: go test ./internal/reliability/wal -run '^$' -bench '^BenchmarkWALBacklogSnapshotRecovery$' -benchtime=30s -count=1
       - name: Validate Docker Compose configuration
         run: |
           cp .env.example .env
