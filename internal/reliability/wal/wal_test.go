@@ -1713,7 +1713,7 @@ func TestWALSteadyStateBacklogSoak(t *testing.T) {
 	if err = w.Close(); err != nil { t.Fatal(err) }
 	w, err = Open(opts)
 	if err != nil { t.Fatalf("initial backlog recovery: %v", err) }
-	defer w.Close()
+	defer func() { if w != nil { _ = w.Close() } }()
 
 	deadline := time.Now().Add(duration)
 	cycles := 0
