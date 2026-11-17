@@ -9,6 +9,38 @@ import (
 	"path/filepath"
 )
 
+
+func (w *WAL) prepareInitialDataSegment() error {
+	path := filepath.Join(w.opts.Dir, fmt.Sprintf("data-%020d.wal", w.manifest.ActiveSegment))
+	if w.manifestExists {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("committed active data segment %d is unavailable: %w", w.manifest.ActiveSegment, err)
+		}
+		return nil
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil && !os.IsExist(err) { return err }
+	if os.IsExist(err) {
+		f, err = os.OpenFile(path, os.O_RDWR, 0600)
+		if err != nil { return err }
+		st, statErr := f.Stat()
+		if statErr != nil { _ = f.Close(); return statErr }
+		if st.Size() != 0 {
+			_ = f.Close()
+			return fmt.Errorf("uncommitted initial data segment %d is not empty", w.manifest.ActiveSegment)
+		}
+	}
+	if err = syncFile(f); err != nil { _ = f.Close(); return err }
+	if err = f.Close(); err != nil { return err }
+	d, err := os.Open(w.opts.Dir)
+	if err != nil { return err }
+	err = syncFile(d)
+	_ = d.Close()
+	if err != nil { return fmt.Errorf("sync directory after initial data segment creation: %w", err) }
+	return nil
+}
+
 func ackSegmentPath(dir string, id uint64) string {
 	return filepath.Join(dir, fmt.Sprintf("ack-%020d.wal", id))
 }
