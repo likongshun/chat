@@ -938,4 +938,4 @@ docker compose up -d --build dashboard
 - `GET /api/v1/devices/{device_id}/points`：设备型号测点定义和最新缓存值。
 - `GET /api/v1/telemetry?device_id=...&point_id=...&from=RFC3339&to=RFC3339&limit=500`：InfluxDB 历史数据。
 
-最新值缓存默认上限为 100,000 个设备/测点组合，可通过 `LATEST_CACHE_MAX_POINTS` 调整。对于 5,000 台设备、每台 300 点的规模，应结合内存预算将容量提高到覆盖目标点数，并实测缓存开销。当前缓存仅保留最新值，不能替代 InfluxDB 历史数据；InfluxDB 未配置或查询失败时，页面会显示明确错误状态，不会生成模拟历史值。
+最新值缓存默认上限为 1,500,000 个设备/测点组合，可通过 `LATEST_CACHE_MAX_POINTS` 调整，默认容量覆盖 5,000 台设备、每台 300 点的目标测点数。该缓存会占用较多内存，正式部署前必须在目标主机上实测 RSS；若内存预算不足，应降低容量并接受部分测点不会同时驻留缓存。当前缓存仅保留最新值，不能替代 InfluxDB 历史数据；InfluxDB 未配置或查询失败时，页面会显示明确错误状态，不会生成模拟历史值。
