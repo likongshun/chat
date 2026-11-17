@@ -93,7 +93,7 @@ func repairFrameTail(path string) error {
 		}
 		if readErr != nil {
 			if readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
-				if err:=f.Truncate(offset);err!=nil{return err};return f.Sync()
+				if err:=f.Truncate(offset);err!=nil{return err};return syncFile(f)
 			}
 			return readErr
 		}
@@ -104,7 +104,7 @@ func repairFrameTail(path string) error {
 		payload := make([]byte, int(length))
 		if _, readErr = io.ReadFull(f, payload); readErr != nil {
 			if readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
-				if err:=f.Truncate(offset);err!=nil{return err};return f.Sync()
+				if err:=f.Truncate(offset);err!=nil{return err};return syncFile(f)
 			}
 			return readErr
 		}
