@@ -22,14 +22,10 @@ func (w *WAL) prepareInitialDataSegment() error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
 	if err != nil && !os.IsExist(err) { return err }
 	if os.IsExist(err) {
+		// A pre-Manifest WAL may already contain valid records in segment 1.
+		// Adopt that legacy active file; recovery below validates every frame.
 		f, err = os.OpenFile(path, os.O_RDWR, 0600)
 		if err != nil { return err }
-		st, statErr := f.Stat()
-		if statErr != nil { _ = f.Close(); return statErr }
-		if st.Size() != 0 {
-			_ = f.Close()
-			return fmt.Errorf("uncommitted initial data segment %d is not empty", w.manifest.ActiveSegment)
-		}
 	}
 	if err = syncFile(f); err != nil { _ = f.Close(); return err }
 	if err = f.Close(); err != nil { return err }
