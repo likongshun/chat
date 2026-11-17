@@ -94,7 +94,9 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
   estimate+=int64(len(event.Payload))+256
  }
  usage,e:=w.diskUsage();if e!=nil{return nil,e}
- if usage+estimate>w.opts.MaxBytes-w.opts.ReserveBytes{w.capacityRejections.Add(1);return nil,ErrCapacity}
+ if usage+estimate>w.admissionLimitBytes(){w.capacityRejections.Add(1);return nil,ErrCapacity}
+ fsUsed,fsTotal,e:=filesystemUsage(w.opts.Dir);if e!=nil{return nil,fmt.Errorf("read filesystem capacity: %w",e)}
+ if fsTotal>0&&float64(fsUsed+uint64(estimate))/float64(fsTotal)>=0.95{w.capacityRejections.Add(1);return nil,ErrCapacity}
  if w.data==nil{return nil,os.ErrClosed}
  start,e:=w.data.Seek(0,io.SeekEnd);if e!=nil{return nil,e}
  records:=make([]Record,0,len(events))
@@ -481,20 +483,42 @@ func (w *WAL) Reclaim()error{
  d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return syncFile(d)
 }
 // Stats returns an operational snapshot for health and Prometheus exporters.
+func (w *WAL) admissionLimitBytes()int64{
+ limit:=w.opts.MaxBytes-w.opts.ReserveBytes
+ stopLimit:=int64(float64(w.opts.MaxBytes)*0.95)
+ if stopLimit<limit{limit=stopLimit}
+ return limit
+}
+
+func classifyDiskLevel(walRatio,filesystemRatio float64)string{
+ ratio:=walRatio
+ if filesystemRatio>ratio{ratio=filesystemRatio}
+ switch{
+ case ratio>=0.95:return "stop"
+ case ratio>=0.85:return "critical"
+ case ratio>=0.70:return "warning"
+ default:return "normal"
+ }
+}
+
 func (w *WAL) Stats()(Stats,error){
  pending,e:=w.PendingWithAcks();if e!=nil{return Stats{},e}
  usage,e:=w.diskUsage();if e!=nil{return Stats{},e}
+ fsUsed,fsTotal,e:=filesystemUsage(w.opts.Dir);if e!=nil{return Stats{},e}
  ids,e:=listSegmentIDs(w.opts.Dir,"data");if e!=nil{return Stats{},e}
  w.mu.Lock()
  stats:=Stats{
   DiskBytes:usage,MaxBytes:w.opts.MaxBytes,
-  PendingRecords:len(pending),SegmentCount:len(ids),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.opts.MaxBytes-w.opts.ReserveBytes,
+  FilesystemBytes:fsUsed,FilesystemTotalBytes:fsTotal,
+  PendingRecords:len(pending),SegmentCount:len(ids),CapacityRejections:w.capacityRejections.Load(),AdmissionLimitBytes:w.admissionLimitBytes(),
   CheckpointSeq:w.manifest.CheckpointSeq,
   FirstSegment:w.manifest.FirstSegment,ActiveSegment:w.manifest.ActiveSegment,
   Fsync:snapshotFsyncMetrics(),
  }
  w.mu.Unlock()
  if stats.MaxBytes>0{stats.DiskUsedRatio=float64(stats.DiskBytes)/float64(stats.MaxBytes)}
+ if stats.FilesystemTotalBytes>0{stats.FilesystemUsedRatio=float64(stats.FilesystemBytes)/float64(stats.FilesystemTotalBytes)}
+ stats.DiskLevel=classifyDiskLevel(stats.DiskUsedRatio,stats.FilesystemUsedRatio)
  now:=time.Now()
  for _,record:=range pending{age:=now.Sub(record.CreatedAt);if age>stats.OldestPendingAge{stats.OldestPendingAge=age}}
  return stats,nil
