@@ -581,3 +581,38 @@ func TestFsyncMetricsCountSyncFailures(t *testing.T) {
 		t.Fatalf("fsync failure metrics not incremented: before=%+v after=%+v", before, after)
 	}
 }
+
+
+func TestDiskWatermarkClassification(t *testing.T) {
+	cases := []struct {
+		ratio float64
+		want string
+	}{
+		{0.69, "normal"},
+		{0.70, "warning"},
+		{0.84, "warning"},
+		{0.85, "critical"},
+		{0.94, "critical"},
+		{0.95, "stop"},
+	}
+	for _, tc := range cases {
+		if got := classifyDiskLevel(tc.ratio, 0); got != tc.want {
+			t.Errorf("classifyDiskLevel(%0.2f)=%q, want %q", tc.ratio, got, tc.want)
+		}
+	}
+	if got := classifyDiskLevel(0.40, 0.96); got != "stop" {
+		t.Fatalf("filesystem pressure should force stop, got %q", got)
+	}
+}
+
+func TestStatsExposeFilesystemUsage(t *testing.T) {
+	w, err := Open(Options{Dir: t.TempDir(), MaxBytes: 1 << 20, ReserveBytes: 0, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	stats, err := w.Stats()
+	if err != nil { t.Fatal(err) }
+	if stats.FilesystemTotalBytes > 0 && (stats.FilesystemBytes == 0 || stats.FilesystemUsedRatio <= 0) {
+		t.Fatalf("filesystem usage not populated: %+v", stats)
+	}
+	if stats.DiskLevel == "" { t.Fatal("disk pressure level is empty") }
+}
