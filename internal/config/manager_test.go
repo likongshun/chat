@@ -8,7 +8,7 @@ import (
 func TestManagerReloadKeepsLastKnownGoodSnapshot(t *testing.T) {
 	initial := Config{
 		Devices: []Device{{ID: "d1", Name: "device", Host: "127.0.0.1", Port: 502, UnitID: 1, Model: "M", Interval: time.Second, Enabled: true}},
-		Points: []Point{{Model: "M", PointCode: "p1", Name: "point", Function: 3, Address: 0, Count: 1, DataType: "UINT16", Scale: 1, RW: "R", Enabled: true}},
+		Points: []Point{{Model: "M", PointCode: "p1", Name: "point", Function: 3, Address: 0, Count: 1, DataType: "UINT16", Scale: 1, Writable: false, Enabled: true}},
 	}
 	manager, err := NewManager(initial)
 	if err != nil {
