@@ -337,3 +337,24 @@ func TestRotationPublishesDurableSegmentBeforeManifest(t *testing.T) {
 	if err = json.Unmarshal(manifest, &saved); err != nil { t.Fatal(err) }
 	if saved.ActiveSegment != 2 { t.Fatalf("persisted active segment=%d, want 2", saved.ActiveSegment) }
 }
+
+func TestAckRetryIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+	r, err := w.Append("ack-idempotent", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	ack := Ack{Seq: r.Seq, Sink: "mqtt", EventID: r.EventID}
+	if err = w.Ack(ack); err != nil { t.Fatal(err) }
+	before, err := os.Stat(filepath.Join(dir, "ack.wal"))
+	if err != nil { t.Fatal(err) }
+	for i := 0; i < 10; i++ {
+		if err = w.Ack(ack); err != nil { t.Fatal(err) }
+	}
+	after, err := os.Stat(filepath.Join(dir, "ack.wal"))
+	if err != nil { t.Fatal(err) }
+	if after.Size() != before.Size() {
+		t.Fatalf("duplicate ACK retry grew log: before=%d after=%d", before.Size(), after.Size())
+	}
+}
