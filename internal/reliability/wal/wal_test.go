@@ -654,3 +654,30 @@ func TestReclaimRevalidatesCommittedCheckpointChecksum(t *testing.T) {
 	}
 	if w.manifest.FirstSegment != 1 { t.Fatalf("first segment advanced to %d after failed validation", w.manifest.FirstSegment) }
 }
+
+
+func TestManifestCommitFailureFailStopsMetadataButKeepsACKs(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+
+	first, err := w.Append("manifest-fail-1", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	second, err := w.Append("manifest-fail-2", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+	}
+	if err = w.Ack(Ack{Seq: second.Seq, Sink: "mqtt", EventID: second.EventID}); err != nil { t.Fatal(err) }
+
+	// Force the MANIFEST rename to fail after checkpoint bytes have been synced.
+	if err = os.Mkdir(filepath.Join(dir, "MANIFEST"), 0700); err != nil { t.Fatal(err) }
+	if err = w.Checkpoint(first.Seq); err == nil { t.Fatal("expected manifest commit failure") }
+	if w.failed == nil { t.Fatal("manifest commit failure must put metadata operations into fail-stop") }
+
+	if err = w.Ack(Ack{Seq: second.Seq, Sink: "influx", EventID: second.EventID}); err != nil {
+		t.Fatalf("ACK path must remain usable after metadata commit failure: %v", err)
+	}
+	if err = w.Reclaim(); err == nil { t.Fatal("reclaim must fail-stop after uncertain manifest commit") }
+}
