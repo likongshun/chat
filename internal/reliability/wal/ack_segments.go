@@ -170,10 +170,16 @@ func (w *WAL) rotateAckSegment() error {
 		return fmt.Errorf("commit ACK segment %d: %w", newID, err)
 	}
 	if w.ack != nil {
-		if err = w.ack.Close(); err != nil { w.ack = nil; return err }
+		if err = w.ack.Close(); err != nil {
+			w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+			return err
+		}
 	}
 	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-	if err != nil { return err }
+	if err != nil {
+		w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+		return err
+	}
 	return nil
 }
 
