@@ -1675,3 +1675,85 @@ func TestWALProcessKillDataSegmentRotationBoundaries(t *testing.T) {
 		})
 	}
 }
+
+
+func TestWALSteadyStateBacklogSoak(t *testing.T) {
+	durationText := os.Getenv("WAL_SOAK_DURATION")
+	if durationText == "" { t.Skip("set WAL_SOAK_DURATION to run the sustained backlog soak") }
+	duration, err := time.ParseDuration(durationText)
+	if err != nil || duration <= 0 { t.Fatalf("invalid WAL_SOAK_DURATION %q", durationText) }
+
+	dir := t.TempDir()
+	opts := Options{Dir: dir, SegmentBytes: 128 << 10, MaxBytes: 256 << 20, ReserveBytes: 4 << 20, Sync: true}
+	w, err := Open(opts)
+	if err != nil { t.Fatal(err) }
+	const initialRecords = 10000
+	const initiallyAcknowledged = 100
+	const backlogSize = initialRecords - initiallyAcknowledged
+
+	for start := 1; start <= initialRecords; start += 100 {
+		batch := make([]AppendInput, 0, 100)
+		for seq := start; seq < start+100; seq++ {
+			batch = append(batch, AppendInput{
+				EventID: fmt.Sprintf("soak-%08d", seq),
+				Payload: json.RawMessage(fmt.Sprintf(`{"seq":%d,"value":%d}`, seq, seq%997)),
+			})
+		}
+		if _, err = w.AppendBatch(batch); err != nil { t.Fatalf("initial backlog append at %d: %v", start, err) }
+	}
+	for seq := 1; seq <= initiallyAcknowledged; seq++ {
+		eventID := fmt.Sprintf("soak-%08d", seq)
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: uint64(seq), Sink: sink, EventID: eventID}); err != nil { t.Fatalf("initial ACK seq %d sink %s: %v", seq, sink, err) }
+		}
+	}
+	if target, checkpointErr := w.CheckpointReady(); checkpointErr != nil || target != initiallyAcknowledged {
+		t.Fatalf("initial prefix=%d err=%v", target, checkpointErr)
+	}
+	if err = w.Close(); err != nil { t.Fatal(err) }
+	w, err = Open(opts)
+	if err != nil { t.Fatalf("initial backlog recovery: %v", err) }
+	defer w.Close()
+
+	deadline := time.Now().Add(duration)
+	cycles := 0
+	for time.Now().Before(deadline) {
+		ackSeq := w.manifest.CheckpointSeq + 1
+		appendSeq := w.next
+		if _, err = w.Append(fmt.Sprintf("soak-%08d", appendSeq), json.RawMessage(fmt.Sprintf(`{"seq":%d,"value":%d}`, appendSeq, appendSeq%997))); err != nil {
+			t.Fatalf("append during soak cycle %d: %v", cycles, err)
+		}
+		eventID := fmt.Sprintf("soak-%08d", ackSeq)
+		for _, sink := range []string{"mqtt", "influx"} {
+			if err = w.Ack(Ack{Seq: ackSeq, Sink: sink, EventID: eventID}); err != nil {
+				t.Fatalf("ACK during soak cycle %d seq %d sink %s: %v", cycles, ackSeq, sink, err)
+			}
+		}
+		target, checkpointErr := w.CheckpointReady()
+		if checkpointErr != nil || target != ackSeq {
+			t.Fatalf("soak checkpoint cycle %d target=%d want=%d err=%v", cycles, target, ackSeq, checkpointErr)
+		}
+		cycles++
+		if cycles%25 == 0 {
+			pending, pendingErr := w.PendingWithAcks()
+			if pendingErr != nil { t.Fatal(pendingErr) }
+			if len(pending) != backlogSize { t.Fatalf("cycle %d pending=%d want=%d", cycles, len(pending), backlogSize) }
+			stats, statsErr := w.Stats()
+			if statsErr != nil { t.Fatal(statsErr) }
+			if stats.DiskLevel == "stop" || stats.PendingRecords != backlogSize {
+				t.Fatalf("unexpected storage pressure during soak cycle %d: %+v", cycles, stats)
+			}
+			if err = w.Close(); err != nil { t.Fatal(err) }
+			w, err = Open(opts)
+			if err != nil { t.Fatalf("restart during soak cycle %d: %v", cycles, err) }
+			pending, pendingErr = w.PendingWithAcks()
+			if pendingErr != nil { t.Fatal(pendingErr) }
+			if len(pending) != backlogSize { t.Fatalf("cycle %d pending changed after restart: %d", cycles, len(pending)) }
+		}
+	}
+	if cycles == 0 { t.Fatal("soak duration elapsed without completing a cycle") }
+	pending, err := w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != backlogSize { t.Fatalf("final pending=%d want=%d after %d cycles", len(pending), backlogSize, cycles) }
+	t.Logf("completed %d steady-state backlog cycles over %s with %d pending records", cycles, duration, backlogSize)
+}
