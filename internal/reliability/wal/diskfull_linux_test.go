@@ -19,7 +19,7 @@ func fillFilesystemUntilENOSPC(t *testing.T, mountDir, name string) string {
 	writeNoSpace := false
 	for {
 		n, writeErr := f.Write(block)
-		if errors.Is(writeErr, syscall.ENOSPC) { writeNoSpace = true; break }
+		if errors.Is(writeErr, syscall.ENOSPC) { if n > 0 { continue }; writeNoSpace = true; break }
 		if writeErr != nil { _ = f.Close(); t.Fatalf("fill bounded filesystem: %v", writeErr) }
 		if n != len(block) { _ = f.Close(); t.Fatalf("short filler write: %d/%d", n, len(block)) }
 	}
