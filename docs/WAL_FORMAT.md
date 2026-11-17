@@ -72,7 +72,7 @@ Versioned checkpoint filenames are important: a checkpoint written before a fail
 
 ACK compaction happens only after the checkpoint manifest commit. If the process crashes before compaction, the old ACK segments remain authoritative. During compaction, the first manifest update expands the range before the active writer switches; the second narrows the range only after the new writer is active. If either update has an uncertain outcome, the old active segment or new active segment remains inside every possible committed range, and obsolete segments are not deleted prematurely. If compaction cannot complete, the checkpoint may already be committed and the call returns an error; recovery can retry compaction.
 
-Manifest version 4 records the checkpoint sequence and payload SHA-256, Data segment boundaries, ACK segment boundaries, and a SHA-256 checksum over the canonical JSON fields excluding the manifest checksum itself. Recovery rejects missing or mismatched checkpoint/manifest checksums and invalid ACK segment ranges. Versions 1, 2, and 3 remain readable; opening a legacy WAL migrates the ACK log into segment 1 and commits a v4 Manifest before removing the legacy file. Version 2 introduced the manifest checksum, version 3 binds exact checkpoint bytes, and version 4 adds manifest-managed ACK segment boundaries. The checkpoint filename is still derived from the sequence; an explicit checkpoint filename/reference field is not yet implemented.
+Manifest version 5 records the checkpoint sequence, explicit checkpoint filename, checkpoint payload SHA-256, Data and ACK segment boundaries, and a SHA-256 checksum over the canonical JSON fields excluding the manifest checksum itself. Recovery validates the checkpoint filename as a basename (no path traversal), then verifies the referenced bytes and checksum. Versions 1 through 4 remain readable; opening a legacy WAL migrates ACK state and upgrades the manifest to v5. Version 2 introduced the manifest checksum, version 3 binds exact checkpoint bytes, version 4 adds manifest-managed ACK segment boundaries, and version 5 adds an explicit checkpoint file reference.
 
 ## Recovery and reclaim order
 
@@ -107,7 +107,7 @@ All WAL file and directory sync paths use one instrumented sync wrapper. It expo
 The following items are **not complete** and must not be assumed from the current implementation:
 
 - A complete checkpoint snapshot with explicit pending-record and per-sink ACK state remains outstanding.
-- Explicit checkpoint filename/reference fields and formal format migration tooling.
+- Formal, operator-facing format migration tooling and a complete pending-record checkpoint snapshot.
 - Automatic ACK reserve replenishment is attempted by the checkpoint/reclaim worker; real disk-full and reserve-exhaustion behavior still needs target-filesystem fault tests.
 - Process-kill fault injection at every checkpoint/manifest/unlink boundary.
 - Real disk-full and reserve-exhaustion tests.
