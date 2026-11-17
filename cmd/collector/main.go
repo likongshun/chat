@@ -50,7 +50,7 @@ func main() {
 		log.Fatalf("open WAL: %v", err)
 	}
 
-	latestSamples := collector.NewLatestStore(envInt("LATEST_CACHE_MAX_POINTS", 100000))
+	latestSamples := collector.NewLatestStore(envInt("LATEST_CACHE_MAX_POINTS", 1500000))
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
 		Latest: latestSamples,
