@@ -118,8 +118,9 @@ func (w *WAL) recover()error{
 	}
 	if w.manifest.CheckpointSeq > 0 || w.manifest.CheckpointFile != "" {
 		cpPath := checkpointPath(w.opts.Dir, w.manifest.CheckpointSeq)
-		if w.manifest.Version >= 5 { cpPath = filepath.Join(w.opts.Dir, w.manifest.CheckpointFile) }
+		if w.manifest.Version >= 5 && w.manifest.CheckpointFile != "" { cpPath = filepath.Join(w.opts.Dir, w.manifest.CheckpointFile) }
 		raw, readErr := os.ReadFile(cpPath)
+		if os.IsNotExist(readErr) && w.manifest.Version < 5 { raw, readErr = os.ReadFile(filepath.Join(w.opts.Dir, "checkpoint.json")) }
 		if readErr != nil { return fmt.Errorf("read committed checkpoint snapshot: %w", readErr) }
 		var snapshot Checkpoint
 		if readErr = json.Unmarshal(raw, &snapshot); readErr != nil { return fmt.Errorf("decode committed checkpoint snapshot: %w", readErr) }
@@ -324,12 +325,12 @@ func (w *WAL) Ack(a Ack)error{
   if e=w.releaseACKReserve();e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
   if e=repairFrameTail(ackPath);e!=nil{return e}
   if _,e=w.ack.Seek(0,io.SeekEnd);e!=nil{return e}
-  if e=writeFrame(w.ack,b);e!=nil{return e}
+  if e=w.writeACKFrame(b);e!=nil{return e}
  }
  if e=w.syncACK();e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
-  if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
-  if e=syncFile(w.ack);e!=nil{return e}
+  if e=w.releaseACKReserve();e!=nil{return fmt.Errorf("ACK sync failed and reserve release failed: %w",e)}
+  if e=w.syncACK();e!=nil{return e}
  }
  return nil
 }
@@ -337,8 +338,9 @@ func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{}
  if w.manifest.CheckpointSeq > 0 || w.manifest.CheckpointFile != "" {
   cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq)
-  if w.manifest.Version>=5 { cpPath=filepath.Join(w.opts.Dir,w.manifest.CheckpointFile) }
-  raw,err:=os.ReadFile(cpPath);if err!=nil{return nil,err}
+  if w.manifest.Version>=5 && w.manifest.CheckpointFile!="" { cpPath=filepath.Join(w.opts.Dir,w.manifest.CheckpointFile) }
+  raw,err:=os.ReadFile(cpPath)
+  if os.IsNotExist(err) && w.manifest.Version<5 { raw,err=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json")) };if err!=nil{return nil,err}
   var snapshot Checkpoint
   if err=json.Unmarshal(raw,&snapshot);err!=nil{return nil,err}
   for _,pending:=range snapshot.Pending {
