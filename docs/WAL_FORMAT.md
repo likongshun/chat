@@ -77,7 +77,7 @@ Manifest version 5 records the checkpoint sequence, explicit checkpoint filename
 ## Recovery and reclaim order
 
 - Acquire the exclusive WAL lock before any recovery.
-- On first initialization, create and sync the initial Data segment and its directory entry before publishing the first MANIFEST. A missing committed active Data segment fails closed; empty uncommitted Data segment orphans are removed, while non-empty orphans fail closed for diagnosis.
+- On first initialization, create and sync the initial Data segment and its directory entry before publishing the first MANIFEST. A legacy pre-Manifest segment 1 is adopted after syncing and then fully validated during recovery. A missing committed active Data segment fails closed; empty uncommitted Data segment orphans are removed, while non-empty orphans fail closed for diagnosis.
 - Repair torn tails in the active Data and ACK files before scanning.
 - Verify that every Data segment in the manifest's inclusive `[first_segment, active_segment]` range exists.
 - Validate Data records and ACK references; fail closed on malformed frames, malformed JSON, missing segments, or mismatched event IDs.
