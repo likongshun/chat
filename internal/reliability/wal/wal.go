@@ -215,8 +215,15 @@ func (w *WAL) Ack(a Ack)error{
  // idempotent fast path. A duplicate sequence with a forged EventID must fail.
  state,err:=w.ackState();if err!=nil{return err}
  if state[a.Sink][a.Seq]{return nil}
- // An ACK is considered committed only after the log sync succeeds.
+ // Rotate only when metadata is healthy. If a previous manifest commit
+ // became uncertain, ACKs must still append to the last known active file.
  b,e:=json.Marshal(a);if e!=nil{return e}
+ if w.failed==nil {
+  st,statErr:=w.ack.Stat();if statErr!=nil{return statErr}
+  if st.Size()>0&&st.Size()+int64(len(b))+8>w.opts.SegmentBytes {
+   if e=w.rotateAckSegment();e!=nil{return fmt.Errorf("rotate ACK segment: %w",e)}
+  }
+ }
  ackPath:=ackSegmentPath(w.opts.Dir,w.manifest.AckActiveSegment)
  if e=writeFrame(w.ack,b);e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
@@ -367,33 +374,7 @@ func (w *WAL) Checkpoint(seq uint64)error{
 }
 
 func (w *WAL) compactAckLog(boundary uint64)error{
- ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
- tmpPath:=ackPath+".tmp"
- tmp,e:=os.OpenFile(tmpPath,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e}
- keepErr:=readFrames(ackPath,func(b []byte)error{
-  var a Ack
-  if e:=json.Unmarshal(b,&a);e!=nil{return e}
-  if a.Seq>boundary{return writeFrame(tmp,b)}
-  return nil
- })
- if keepErr!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return keepErr}
- if e=syncFile(tmp);e!=nil{_ = tmp.Close();_ = os.Remove(tmpPath);return e}
- if e=tmp.Close();e!=nil{_ = os.Remove(tmpPath);return e}
- if w.ack!=nil{
-  if e=syncFile(w.ack);e!=nil{_ = os.Remove(tmpPath);return e}
-  if e=w.ack.Close();e!=nil{_ = os.Remove(tmpPath);return e}
-  w.ack=nil
- }
- if e=os.Rename(tmpPath,ackPath);e!=nil{
-  w.ack,_=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
-  return e
- }
- d,e:=os.Open(w.opts.Dir)
- var syncErr error
- if e!=nil{syncErr=e}else{syncErr=syncFile(d);_ = d.Close()}
- w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600)
- if e!=nil{return e}
- return syncErr
+	return w.compactAckSegments(boundary)
 }
 
 func checkpointPath(dir string,seq uint64)string{return filepath.Join(dir,fmt.Sprintf("checkpoint-%020d.json",seq))}
