@@ -228,12 +228,13 @@ func (w *WAL) compactAckSegments(boundary uint64) error {
 		return fmt.Errorf("commit compacted ACK segment: %w", err)
 	}
 
-	if w.ack != nil {
-		closeErr := w.ack.Close()
-		w.ack = nil
-		if closeErr != nil { return closeErr }
+	oldHandle := w.ack
+	w.ack = nil
+	newHandle, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
+	if openErr != nil { return openErr }
+	w.ack = newHandle
+	if oldHandle != nil {
+		if closeErr := oldHandle.Close(); closeErr != nil { return closeErr }
 	}
-	w.ack, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
-	if err != nil { return err }
 	return w.cleanupObsoleteAckSegments()
 }
