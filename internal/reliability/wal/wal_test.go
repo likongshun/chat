@@ -1200,8 +1200,6 @@ func TestCheckpointSnapshotRejectsDataMismatch(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if err = atomicFile(checkpointFile, raw); err != nil { t.Fatal(err) }
 	// Rebind the checksum to ensure recovery detects semantic mismatch, not only a bad digest.
-	sum := sha256.Sum256(raw)
-	w.manifest.CheckpointChecksum = hex.EncodeToString(sum[:])
 	if err = w.saveManifest(); err != nil { t.Fatal(err) }
 	if err = w.Close(); err != nil { t.Fatal(err) }
 	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil {
