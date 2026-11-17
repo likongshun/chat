@@ -34,8 +34,10 @@ func (w *WAL) repairActiveTails()error{
   filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment)),
   ackSegmentPath(w.opts.Dir, func() uint64 { if w.manifest.AckActiveSegment == 0 { return 1 }; return w.manifest.AckActiveSegment }()),
  }
- for _,p:=range paths{
-  f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR,0600);if e!=nil{return e}
+ for i,p:=range paths{
+  flags:=os.O_RDWR
+  if i==0{flags|=os.O_CREATE}
+  f,e:=os.OpenFile(p,flags,0600);if e!=nil{return fmt.Errorf("open committed WAL file %s: %w",p,e)}
   if e=f.Close();e!=nil{return e}
   if e=repairFrameTail(p);e!=nil{return e}
  }
@@ -221,7 +223,7 @@ func (w *WAL) Ack(a Ack)error{
  if w.failed==nil {
   st,statErr:=w.ack.Stat();if statErr!=nil{return statErr}
   if st.Size()>0&&st.Size()+int64(len(b))+8>w.opts.SegmentBytes {
-   if e=w.rotateAckSegment();e!=nil{return fmt.Errorf("rotate ACK segment: %w",e)}
+   if e=w.rotateAckSegment();e!=nil&&w.ack==nil{return fmt.Errorf("rotate ACK segment: %w",e)}
   }
  }
  ackPath:=ackSegmentPath(w.opts.Dir,w.manifest.AckActiveSegment)
