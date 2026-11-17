@@ -1508,6 +1508,7 @@ func BenchmarkWALBacklogSnapshotRecovery(b *testing.B) {
 		w, err = Open(Options{Dir: dir, MaxBytes: 128 << 20, ReserveBytes: 1 << 20, Sync: true})
 		if err != nil { b.Fatal(err) }
 		if err = w.Close(); err != nil { b.Fatal(err) }
+		if err = os.RemoveAll(dir); err != nil { b.Fatal(err) }
 	}
 }
 
