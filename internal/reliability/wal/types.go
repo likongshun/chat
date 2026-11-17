@@ -36,4 +36,5 @@ type Stats struct {
  CheckpointSeq uint64
  FirstSegment uint64
  ActiveSegment uint64
+ Fsync FsyncStats
 }
