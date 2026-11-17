@@ -42,6 +42,11 @@ func (w *WAL) prepareAckSegments() error {
 		if w.manifest.AckFirstSegment == 0 || w.manifest.AckActiveSegment < w.manifest.AckFirstSegment {
 			return fmt.Errorf("invalid ACK segment boundaries")
 		}
+		// A crash may occur after the Manifest migration commit but before
+		// unlinking the legacy source file. The committed segments are now
+		// authoritative, so removing the old file is safe and repeatable.
+		legacy := filepath.Join(w.opts.Dir, "ack.wal")
+		if err := os.Remove(legacy); err != nil && !os.IsNotExist(err) { return err }
 		return nil
 	}
 
