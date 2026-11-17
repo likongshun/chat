@@ -477,6 +477,9 @@ func (w *WAL) saveManifest()error{
    if e==nil{if copyErr:=atomicFile(cpPath,cp);copyErr!=nil{return fmt.Errorf("migrate legacy checkpoint file reference: %w",copyErr)}}
   }
   if e!=nil{return fmt.Errorf("read checkpoint for manifest commit: %w",e)}
+  var checkpoint Checkpoint
+  if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode checkpoint for manifest commit: %w",e)}
+  if checkpoint.Seq!=next.CheckpointSeq{return fmt.Errorf("checkpoint file sequence %d does not match manifest sequence %d",checkpoint.Seq,next.CheckpointSeq)}
   sum:=sha256.Sum256(cp)
   next.CheckpointChecksum=hex.EncodeToString(sum[:])
  }
