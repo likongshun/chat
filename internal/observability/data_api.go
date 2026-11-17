@@ -96,8 +96,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	items:=make([]deviceView,0,len(cfg.Devices))
 	for _,d:=range cfg.Devices {
 		var seen *time.Time
-		deviceLatest:=s.Latest.Snapshot(d.ID)
-		for _,v:=range deviceLatest { if !v.LastSuccess.IsZero()&&(seen==nil||v.LastSuccess.After(*seen)){t:=v.LastSuccess;seen=&t} }
+		if last:=s.Latest.LastSuccess(d.ID);!last.IsZero(){seen=&last}
 		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
@@ -131,10 +130,13 @@ func (s *Server) queryTelemetry(w http.ResponseWriter,r *http.Request) {
 	deviceID:=strings.TrimSpace(r.URL.Query().Get("device_id"))
 	pointCode:=strings.TrimSpace(r.URL.Query().Get("point_id"))
 	if deviceID==""||pointCode==""||len(deviceID)>128||len(pointCode)>128 { http.Error(w,"device_id and point_id are required",http.StatusBadRequest);return }
-	cfg:=s.currentConfig()
+	cfg,pointsByModel,_:=s.configurationIndex()
 	if cfg==nil { http.Error(w,"configuration unavailable",http.StatusServiceUnavailable);return }
+	var model string
+	for _,d:=range cfg.Devices { if d.ID==deviceID { model=d.Model;break } }
+	if model=="" { http.Error(w,"unknown device or point",http.StatusNotFound);return }
 	valid:=false
-	for _,d:=range cfg.Devices { if d.ID==deviceID { for _,p:=range cfg.Points {if p.Model==d.Model&&p.PointCode==pointCode&&p.Enabled {valid=true;break}};break } }
+	for _,p:=range pointsByModel[model] { if p.PointCode==pointCode&&p.Enabled {valid=true;break} }
 	if !valid { http.Error(w,"unknown device or point",http.StatusNotFound);return }
 	if s.Influx==nil||s.Influx.Token=="" { http.Error(w,"historical data source is not configured",http.StatusServiceUnavailable);return }
 	now:=time.Now().UTC()
