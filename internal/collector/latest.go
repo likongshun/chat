@@ -15,6 +15,7 @@ type LatestStore struct {
 	items map[string]LatestSample
 	order *list.List
 	index map[string]*list.Element
+	byDevice map[string]map[string]LatestSample
 }
 
 type LatestSample struct {
@@ -28,7 +29,7 @@ type LatestSample struct {
 
 func NewLatestStore(maxEntries int) *LatestStore {
 	if maxEntries <= 0 { maxEntries = 100000 }
-	return &LatestStore{max:maxEntries, items:make(map[string]LatestSample), order:list.New(), index:make(map[string]*list.Element)}
+	return &LatestStore{max:maxEntries, items:make(map[string]LatestSample), order:list.New(), index:make(map[string]*list.Element), byDevice:make(map[string]map[string]LatestSample)}
 }
 
 func latestKey(deviceID, pointCode string) string { return deviceID + "\x00" + pointCode }
@@ -40,7 +41,9 @@ func (s *LatestStore) Update(samples []Sample) {
 	for _, sample := range samples {
 		key:=latestKey(sample.DeviceID,sample.PointCode)
 		if element:=s.index[key]; element!=nil {
-			s.items[key]=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+			s.items[key]=latest
+			s.byDevice[sample.DeviceID][sample.PointCode]=latest
 			s.order.MoveToBack(element)
 			continue
 		}
@@ -48,9 +51,16 @@ func (s *LatestStore) Update(samples []Sample) {
 			oldest:=s.order.Front()
 			if oldest==nil { break }
 			oldKey:=oldest.Value.(string)
-			delete(s.items,oldKey);delete(s.index,oldKey);s.order.Remove(oldest)
+			oldSample:=s.items[oldKey]
+			delete(s.items,oldKey);delete(s.index,oldKey)
+			delete(s.byDevice[oldSample.DeviceID],oldSample.PointCode)
+			if len(s.byDevice[oldSample.DeviceID])==0 { delete(s.byDevice,oldSample.DeviceID) }
+			s.order.Remove(oldest)
 		}
-		s.items[key]=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp}
+		s.items[key]=latest
+		if s.byDevice[sample.DeviceID]==nil { s.byDevice[sample.DeviceID]=make(map[string]LatestSample) }
+		s.byDevice[sample.DeviceID][sample.PointCode]=latest
 		s.index[key]=s.order.PushBack(key)
 	}
 }
@@ -66,6 +76,7 @@ func (s *LatestStore) Snapshot(deviceID string) map[string]LatestSample {
 	out:=make(map[string]LatestSample)
 	if s==nil{return out}
 	s.mu.RLock();defer s.mu.RUnlock()
-	for _,v:=range s.items { if deviceID==""||v.DeviceID==deviceID { out[v.PointCode]=v } }
+	if deviceID!="" { for code,v:=range s.byDevice[deviceID] { out[code]=v }; return out }
+	for _,v:=range s.items { out[v.PointCode]=v }
 	return out
 }
