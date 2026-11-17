@@ -2,6 +2,7 @@ package wal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -181,7 +182,7 @@ func (w *WAL) rotateAckSegment() error {
 		if err = w.ack.Close(); err != nil {
 			w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 			w.manifest.AckActiveSegment = oldID
-			w.failed = errorsJoin(w.failed, fmt.Errorf("ACK segment handle switch failed after manifest commit: %w", err))
+			w.failed = errors.Join(w.failed, fmt.Errorf("ACK segment handle switch failed after manifest commit: %w", err))
 			return err
 		}
 	}
@@ -189,7 +190,7 @@ func (w *WAL) rotateAckSegment() error {
 	if err != nil {
 		w.ack, _ = os.OpenFile(ackSegmentPath(w.opts.Dir, oldID), os.O_CREATE|os.O_RDWR|os.O_APPEND, 0600)
 		w.manifest.AckActiveSegment = oldID
-		w.failed = errorsJoin(w.failed, fmt.Errorf("open committed ACK segment %d: %w", newID, err))
+		w.failed = errors.Join(w.failed, fmt.Errorf("open committed ACK segment %d: %w", newID, err))
 		return err
 	}
 	return nil
