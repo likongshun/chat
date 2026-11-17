@@ -965,5 +965,19 @@ func TestManifestV5RejectsCheckpointPathTraversal(t *testing.T) {
 	if err = w.Checkpoint(record.Seq); err != nil { t.Fatal(err) }
 	w.manifest.CheckpointFile = "../outside.json"
 	if err = w.saveManifest(); err == nil { t.Fatal("unsafe checkpoint reference must not be committed") }
-	_ = w.Close()
+	if err = w.Close(); err != nil { t.Fatal(err) }
+
+	raw, err := os.ReadFile(filepath.Join(dir, "MANIFEST"))
+	if err != nil { t.Fatal(err) }
+	var manifest Manifest
+	if err = json.Unmarshal(raw, &manifest); err != nil { t.Fatal(err) }
+	manifest.CheckpointFile = "../outside.json"
+	manifest.Checksum, err = manifestChecksum(manifest)
+	if err != nil { t.Fatal(err) }
+	raw, err = json.Marshal(manifest)
+	if err != nil { t.Fatal(err) }
+	if err = os.WriteFile(filepath.Join(dir, "MANIFEST"), raw, 0600); err != nil { t.Fatal(err) }
+	if _, err = Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true}); err == nil || !strings.Contains(err.Error(), "invalid manifest checkpoint file reference") {
+		t.Fatalf("unsafe checkpoint reference must be rejected on load, got %v", err)
+	}
 }
