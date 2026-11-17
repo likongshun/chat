@@ -462,7 +462,7 @@ func TestManifestV5ChecksumRejectsTampering(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var m Manifest
 	if err = json.Unmarshal(raw, &m); err != nil { t.Fatal(err) }
-	if m.Version != 5 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
+	if m.Version != 6 || m.Checksum == "" { t.Fatalf("expected checksummed v2 manifest, got %+v", m) }
 	m.Checksum = strings.Repeat("0", len(m.Checksum))
 	tampered, err := json.Marshal(m)
 	if err != nil { t.Fatal(err) }
@@ -519,9 +519,9 @@ func TestManifestV2UpgradesToV5OnOpen(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 5 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 6 || upgraded.Checksum == "" { t.Fatalf("v2 manifest was not upgraded: %+v", upgraded) }
 	reopened, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
-	if err != nil { t.Fatalf("reopen v5 manifest: %v", err) }
+	if err != nil { t.Fatalf("reopen v6 manifest: %v", err) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
 }
 
@@ -542,7 +542,7 @@ func TestLegacyManifestUpgradesToV5OnOpen(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var upgraded Manifest
 	if err = json.Unmarshal(raw, &upgraded); err != nil { t.Fatal(err) }
-	if upgraded.Version != 5 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
+	if upgraded.Version != 6 || upgraded.Checksum == "" { t.Fatalf("legacy manifest was not upgraded: %+v", upgraded) }
 	reopened, reopenErr := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if reopenErr != nil { t.Fatalf("reopen upgraded manifest: %v", reopenErr) }
 	if err = reopened.Close(); err != nil { t.Fatal(err) }
@@ -754,7 +754,7 @@ func TestLegacyACKLogMigratesToManifestManagedSegment(t *testing.T) {
 	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
 	defer w.Close()
-	if w.manifest.Version != 5 || w.manifest.AckFirstSegment != 1 || w.manifest.AckActiveSegment != 1 {
+	if w.manifest.Version != 6 || w.manifest.AckFirstSegment != 1 || w.manifest.AckActiveSegment != 1 {
 		t.Fatalf("legacy manifest was not migrated: %+v", w.manifest)
 	}
 	if _, err = os.Stat(legacy); !os.IsNotExist(err) {
@@ -926,7 +926,7 @@ func TestRecoveryCleansACKSegmentsAfterCommittedBoundaryAdvance(t *testing.T) {
 }
 
 
-func TestManifestV5UsesExplicitCheckpointFileReference(t *testing.T) {
+func TestManifestV6UsesExplicitCheckpointFileReference(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
@@ -942,7 +942,7 @@ func TestManifestV5UsesExplicitCheckpointFileReference(t *testing.T) {
 	if err = os.Rename(oldPath, customPath); err != nil { t.Fatal(err) }
 	w.manifest.CheckpointFile = customName
 	if err = w.saveManifest(); err != nil { t.Fatal(err) }
-	if w.manifest.Version != 5 || w.manifest.CheckpointFile != customName {
+	if w.manifest.Version != 6 || w.manifest.CheckpointFile != customName {
 		t.Fatalf("explicit checkpoint reference not committed: %+v", w.manifest)
 	}
 	if err = w.Close(); err != nil { t.Fatal(err) }
@@ -1022,7 +1022,7 @@ func TestACKReserveReplenishmentSerializesWithConcurrentACK(t *testing.T) {
 }
 
 
-func TestManifestV4MigrationMaterializesLegacyCheckpointFile(t *testing.T) {
+func TestManifestV4MigrationMaterializesLegacyCheckpointFileToV6(t *testing.T) {
 	dir := t.TempDir()
 	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatal(err) }
@@ -1116,7 +1116,7 @@ func TestOpenAdoptsLegacyNonEmptyDataAndACKWithoutManifest(t *testing.T) {
 	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
 	if err != nil { t.Fatalf("adopt legacy WAL without manifest: %v", err) }
 	defer w.Close()
-	if w.manifest.Version != 5 || w.next != 2 { t.Fatalf("legacy WAL was not adopted: manifest=%+v next=%d", w.manifest, w.next) }
+	if w.manifest.Version != 6 || w.next != 2 { t.Fatalf("legacy WAL was not adopted: manifest=%+v next=%d", w.manifest, w.next) }
 	pending, err := w.PendingWithAcks()
 	if err != nil { t.Fatal(err) }
 	if len(pending) != 1 || pending[0].Seq != 1 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
