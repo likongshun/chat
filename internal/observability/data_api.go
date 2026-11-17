@@ -72,13 +72,14 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
 	cfg:=s.currentConfig()
 	if cfg==nil { writeJSON(w,http.StatusOK,[]deviceView{});return }
+	pointCounts:=make(map[string]int)
+	for _,p:=range cfg.Points { if p.Enabled { pointCounts[p.Model]++ } }
 	items:=make([]deviceView,0,len(cfg.Devices))
 	for _,d:=range cfg.Devices {
-		count:=0
 		var seen *time.Time
 		deviceLatest:=s.Latest.Snapshot(d.ID)
-		for _,p:=range cfg.Points { if p.Model==d.Model && p.Enabled { count++; if v,ok:=deviceLatest[p.PointCode];ok&&!v.LastSuccess.IsZero()&&(seen==nil||v.LastSuccess.After(*seen)){t:=v.LastSuccess;seen=&t} } }
-		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:count,LastSeen:seen})
+		for _,v:=range deviceLatest { if !v.LastSuccess.IsZero()&&(seen==nil||v.LastSuccess.After(*seen)){t:=v.LastSuccess;seen=&t} }
+		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
 }
