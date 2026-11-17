@@ -47,10 +47,18 @@ func (w *WAL) recover()error{
  for seg:=w.manifest.FirstSegment;seg<=w.manifest.ActiveSegment;seg++{
   p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",seg))
   if _,e:=os.Stat(p);e!=nil{return fmt.Errorf("required data segment %d is unavailable: %w",seg,e)}
-  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};if r.Seq>w.manifest.CheckpointSeq{if old,ok:=eventIDs[r.Seq];ok&&old!=r.EventID{return fmt.Errorf("conflicting event IDs for sequence %d",r.Seq)};eventIDs[r.Seq]=r.EventID};return nil});e!=nil{return e}
+  if e:=readFrames(p,func(b []byte)error{var r Record;if e:=json.Unmarshal(b,&r);e!=nil{return fmt.Errorf("decode data record in %s: %w",p,e)};if r.Seq==0||r.EventID==""||len(r.Payload)==0{return fmt.Errorf("invalid data record in %s",p)};if r.Seq>max{max=r.Seq};if r.Seq>w.manifest.CheckpointSeq{if _,ok:=eventIDs[r.Seq];ok{return fmt.Errorf("duplicate WAL sequence %d",r.Seq)};eventIDs[r.Seq]=r.EventID};return nil});e!=nil{return e}
   if seg==^uint64(0){break}
  }
- if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
+ if max > w.manifest.CheckpointSeq {
+		for seq := w.manifest.CheckpointSeq + 1; seq <= max; seq++ {
+			if _, ok := eventIDs[seq]; !ok {
+				return fmt.Errorf("non-contiguous WAL sequence: missing %d before %d", seq, max)
+			}
+			if seq == ^uint64(0) { break }
+		}
+	}
+	if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
  if e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if e:=json.Unmarshal(b,&a);e!=nil{return e};if a.Seq<=w.manifest.CheckpointSeq{return nil};id,ok:=eventIDs[a.Seq];if !ok{return fmt.Errorf("ACK references unknown sequence %d during recovery",a.Seq)};if id!=a.EventID{return fmt.Errorf("ACK event_id mismatch for sequence %d during recovery",a.Seq)};return nil});e!=nil{return fmt.Errorf("validate ACK references: %w",e)}
  w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")};return nil
 }
@@ -110,16 +118,76 @@ func (w *WAL) AppendBatch(events []AppendInput)([]Record,error){
  }
  return records,nil
 }
-func (w *WAL) rotate()error{
- if w.data==nil{return os.ErrClosed}
- if e:=w.data.Sync();e!=nil{return e}
- if e:=w.data.Close();e!=nil{return e}
- if w.manifest.ActiveSegment==^uint64(0){w.data=nil;return fmt.Errorf("WAL segment sequence exhausted")}
- old:=w.manifest.ActiveSegment
- w.manifest.ActiveSegment++
- if e:=w.saveManifest();e!=nil{w.manifest.ActiveSegment=old;_ = w.openDataOnly();return e}
- if e:=w.openDataOnly();e!=nil{return fmt.Errorf("manifest advanced to segment %d but opening it failed: %w",w.manifest.ActiveSegment,e)}
- d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return d.Sync()
+func (w *WAL) rotate() error {
+	if w.data == nil {
+		return os.ErrClosed
+	}
+	if w.manifest.ActiveSegment == ^uint64(0) {
+		return fmt.Errorf("WAL segment sequence exhausted")
+	}
+	if err := w.data.Sync(); err != nil {
+		return err
+	}
+
+	// Publish the new segment's directory entry before MANIFEST can refer to it.
+	// A crash before the manifest commit leaves only an ignored orphan segment;
+	// a crash after the commit leaves a segment that recovery can always open.
+	oldID := w.manifest.ActiveSegment
+	newID := oldID + 1
+	newPath := filepath.Join(w.opts.Dir, fmt.Sprintf("data-%020d.wal", newID))
+	created, err := os.OpenFile(newPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create next WAL segment: %w", err)
+	}
+	if os.IsExist(err) {
+		// An empty file may be an orphan from a crash before MANIFEST commit.
+		created, err = os.OpenFile(newPath, os.O_RDWR, 0600)
+		if err != nil {
+			return err
+		}
+		st, statErr := created.Stat()
+		if statErr != nil {
+			_ = created.Close()
+			return statErr
+		}
+		if st.Size() != 0 {
+			_ = created.Close()
+			return fmt.Errorf("uncommitted next segment %d is not empty", newID)
+		}
+	}
+	if err = created.Sync(); err != nil {
+		_ = created.Close()
+		return err
+	}
+	if err = created.Close(); err != nil {
+		return err
+	}
+	dir, err := os.Open(w.opts.Dir)
+	if err != nil {
+		return err
+	}
+	err = dir.Sync()
+	_ = dir.Close()
+	if err != nil {
+		return fmt.Errorf("sync directory after creating segment %d: %w", newID, err)
+	}
+
+	w.manifest.ActiveSegment = newID
+	if err = w.saveManifest(); err != nil {
+		w.manifest.ActiveSegment = oldID
+		return fmt.Errorf("commit active segment %d: %w", newID, err)
+	}
+
+	// MANIFEST is now durable. Switch handles only after the commit.
+	if err = w.data.Close(); err != nil {
+		w.data = nil
+		return fmt.Errorf("manifest committed to segment %d but closing old segment failed: %w", newID, err)
+	}
+	w.data = nil
+	if err = w.openDataOnly(); err != nil {
+		return fmt.Errorf("manifest committed to segment %d but opening it failed: %w", newID, err)
+	}
+	return nil
 }
 func (w *WAL) openDataOnly()error{p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);w.data=f;return e}
 func (w *WAL) Ack(a Ack)error{
