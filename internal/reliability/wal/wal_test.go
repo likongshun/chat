@@ -286,3 +286,54 @@ func TestWALStatsExposePendingCapacityAndSegments(t *testing.T) {
  if stats.DiskBytes<=0||stats.DiskUsedRatio<=0{t.Fatalf("invalid disk stats: %+v",stats)}
  if stats.SegmentCount<2{t.Fatalf("segment count=%d, want rotated segments",stats.SegmentCount)}
 }
+
+
+func TestCheckpointRejectsSequenceGap(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+
+	first, err := w.Append("gap-1", json.RawMessage(`{"v":1}`))
+	if err != nil { t.Fatal(err) }
+	second, err := w.Append("gap-2", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	for _, sink := range []string{"mqtt", "influx"} {
+		if err = w.Ack(Ack{Seq: first.Seq, Sink: sink, EventID: first.EventID}); err != nil { t.Fatal(err) }
+		if err = w.Ack(Ack{Seq: second.Seq, Sink: sink, EventID: second.EventID}); err != nil { t.Fatal(err) }
+	}
+
+	// Simulate corruption/loss of the first record while retaining a valid frame
+	// for sequence 2. A checkpoint must never jump over the missing sequence.
+	path := filepath.Join(dir, "data-00000000000000000001.wal")
+	f, err := os.OpenFile(path, os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil { t.Fatal(err) }
+	raw, err := json.Marshal(second)
+	if err != nil { t.Fatal(err) }
+	if err = writeFrame(f, raw); err != nil { t.Fatal(err) }
+	if err = f.Sync(); err != nil { t.Fatal(err) }
+	if err = f.Close(); err != nil { t.Fatal(err) }
+
+	if err = w.Checkpoint(second.Seq); err == nil || !strings.Contains(err.Error(), "sequence gap") {
+		t.Fatalf("expected sequence gap rejection, got %v", err)
+	}
+}
+
+func TestRotationPublishesDurableSegmentBeforeManifest(t *testing.T) {
+	dir := t.TempDir()
+	w, err := Open(Options{Dir: dir, SegmentBytes: 1, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatal(err) }
+	defer w.Close()
+
+	if _, err = w.Append("rotate-1", json.RawMessage(`{"v":1}`)); err != nil { t.Fatal(err) }
+	if w.manifest.ActiveSegment != 2 { t.Fatalf("active segment=%d, want 2", w.manifest.ActiveSegment) }
+	path := filepath.Join(dir, "data-00000000000000000002.wal")
+	st, err := os.Stat(path)
+	if err != nil { t.Fatalf("manifest points to missing segment: %v", err) }
+	if st.Size() != 0 { t.Fatalf("new active segment should be empty after first rotation, got %d bytes", st.Size()) }
+	manifest, err := os.ReadFile(filepath.Join(dir, "MANIFEST"))
+	if err != nil { t.Fatal(err) }
+	var saved Manifest
+	if err = json.Unmarshal(manifest, &saved); err != nil { t.Fatal(err) }
+	if saved.ActiveSegment != 2 { t.Fatalf("persisted active segment=%d, want 2", saved.ActiveSegment) }
+}
