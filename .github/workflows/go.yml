@@ -39,7 +39,7 @@ jobs:
       - name: Prepare bounded ext4 filesystem for real WAL ENOSPC test
         run: |
           sudo truncate -s 128M /tmp/modbus-wal-fs.img
-          sudo mkfs.ext4 -F /tmp/modbus-wal-fs.img
+          sudo mkfs.ext4 -F -m 0 /tmp/modbus-wal-fs.img
           sudo mkdir -p /mnt/modbus-wal-fs
           sudo mount -o loop /tmp/modbus-wal-fs.img /mnt/modbus-wal-fs
           sudo chown "$(id -u):$(id -g)" /mnt/modbus-wal-fs
