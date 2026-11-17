@@ -45,7 +45,7 @@ Repository: `https://github.com/likongshun/chat`
 Remaining WAL/delivery gaps:
 - ACK WAL is still a single file, not segmented.
 - Checkpoint is a fully ACKed prefix, not a complete pending-record snapshot with per-sink state.
-- Manifest v2 SHA-256 checksum and v1-to-v2 read compatibility are implemented; checkpoint payload checksum and explicit checkpoint reference fields are not implemented.
+- Manifest v3 SHA-256 checksum binds the exact checkpoint payload bytes; v1/v2 manifests remain readable and are upgraded on the next successful metadata commit. Explicit checkpoint filename/reference fields are not implemented.
 - Linux ACK reserve is preallocated at open, released only as an emergency last-resort ACK allowance, and replenished by the checkpoint/reclaim worker after space is freed. Filesystem-wide warning/critical/stop watermarks are not implemented. Basic WAL capacity rejection, disk usage, pending and segment metrics are exposed.
 - Unified fsync metrics and process-kill/disk-full fault injection are not complete.
 - MQTT, InfluxDB and PostgreSQL integration tests are included in the Compose-backed CI job; physical-device and production-filesystem tests are still required.
