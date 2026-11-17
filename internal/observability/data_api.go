@@ -104,11 +104,13 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) devicePoints(w http.ResponseWriter,r *http.Request) {
 	if r.Method!=http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
-	id:=strings.TrimPrefix(r.URL.Path,"/api/v1/devices/")
+	id:=strings.TrimPrefix(r.URL.EscapedPath(),"/api/v1/devices/")
 	if !strings.HasSuffix(id,"/points") { http.NotFound(w,r);return }
 	id=strings.TrimSuffix(id,"/points")
 	id=strings.Trim(id,"/")
-	if id==""||strings.Contains(id,"/") { http.NotFound(w,r);return }
+	decodedID,decodeErr:=url.PathUnescape(id)
+	if decodeErr!=nil||decodedID=="" { http.NotFound(w,r);return }
+	id=decodedID
 	cfg,pointsByModel,_:=s.configurationIndex()
 	if cfg==nil { writeJSON(w,http.StatusOK,[]pointView{});return }
 	var device *config.Device
