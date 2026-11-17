@@ -446,6 +446,8 @@ func (w *WAL) Checkpoint(seq uint64)error{
  if w.data!=nil{if e:=syncFile(w.data);e!=nil{return e}}
  if w.ack!=nil{if e:=syncFile(w.ack);e!=nil{return e}}
  acked,e:=w.ackState();if e!=nil{return e}
+ hasCoveredACK:=false
+ for _,sinkState:=range acked{for ackSeq:=range sinkState{if ackSeq<=seq{hasCoveredACK=true;break}}}
  files,e:=filepath.Glob(filepath.Join(w.opts.Dir,"data-*.wal"));if e!=nil{return e}
  sort.Strings(files)
  expected := w.manifest.CheckpointSeq + 1
@@ -490,7 +492,10 @@ func (w *WAL) Checkpoint(seq uint64)error{
    var existing Checkpoint
    if json.Unmarshal(existingRaw,&existing)==nil && existing.FormatVersion>=2 {
     oldPending,_:=json.Marshal(existing.Pending);newPending,_:=json.Marshal(cp.Pending)
-    if bytes.Equal(oldPending,newPending){return nil}
+    if bytes.Equal(oldPending,newPending){
+     if hasCoveredACK { if compactErr:=w.compactAckLog(seq);compactErr!=nil{return fmt.Errorf("retry ACK compaction for checkpoint %d: %w",seq,compactErr)} }
+     return nil
+    }
    }
   }
  }
