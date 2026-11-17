@@ -310,6 +310,9 @@ var errCheckpointBlocked=errors.New("checkpoint blocked by pending downstream AC
 func (w *WAL) Checkpoint(seq uint64)error{
  w.mu.Lock();defer w.mu.Unlock()
  if w.closed{return os.ErrClosed}
+ // A failed append/rotation may leave MANIFEST durability uncertain. ACKs
+ // remain available, but metadata commits and deletion must fail closed.
+ if w.failed!=nil{return fmt.Errorf("WAL metadata operations are fail-stopped: %w",w.failed)}
  if seq<w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint cannot move backwards from %d to %d",w.manifest.CheckpointSeq,seq)}
  if seq>=w.next{return fmt.Errorf("checkpoint seq %d is beyond last appended seq %d",seq,w.next-1)}
  // Freeze and persist both logs before recording a checkpoint boundary.
@@ -409,6 +412,9 @@ func atomicFile(path string,b []byte)error{
 func (w *WAL) Reclaim()error{
  w.mu.Lock();defer w.mu.Unlock()
  if w.closed{return os.ErrClosed}
+ // Never advance deletion boundaries while a prior manifest/append outcome
+ // is uncertain. ACK appends are intentionally not gated by this flag. 
+ if w.failed!=nil{return fmt.Errorf("WAL reclaim is fail-stopped: %w",w.failed)}
  if w.manifest.CheckpointSeq==0{return nil}
  // A reclaim operation must be backed by the checkpoint committed by MANIFEST.
  raw,e:=os.ReadFile(checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq));if os.IsNotExist(e){raw,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("read committed checkpoint before reclaim: %w",e)}
