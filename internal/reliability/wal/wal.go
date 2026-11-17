@@ -2,6 +2,8 @@ package wal
 
 import (
  "encoding/json"
+ "crypto/sha256"
+ "encoding/hex"
  "errors"
  "fmt"
  "io"
@@ -25,7 +27,7 @@ func Open(o Options)(*WAL,error){
 }
 func (w *WAL) loadManifest()error{
  b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
- if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
+ if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1&&w.manifest.Version!=2{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.Version==2{if w.manifest.Checksum==""{return fmt.Errorf("manifest checksum is required for version 2")};expected,err:=manifestChecksum(w.manifest);if err!=nil{return err};if !strings.EqualFold(expected,w.manifest.Checksum){return fmt.Errorf("manifest checksum mismatch")}};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
 }
 func (w *WAL) repairActiveTails()error{
  paths:=[]string{
@@ -408,7 +410,26 @@ func (w *WAL) cleanupObsoleteSegments()error{
  return nil
 }
 
-func (w *WAL) saveManifest()error{b,e:=json.Marshal(w.manifest);if e!=nil{return e};return atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b)}
+func manifestChecksum(m Manifest)(string,error){
+ m.Checksum=""
+ b,e:=json.Marshal(m);if e!=nil{return "",e}
+ sum:=sha256.Sum256(b)
+ return hex.EncodeToString(sum[:]),nil
+}
+
+func (w *WAL) saveManifest()error{
+ next:=w.manifest
+ next.Version=2
+ checksum,e:=manifestChecksum(next);if e!=nil{return e}
+ next.Checksum=checksum
+ b,e:=json.Marshal(next);if e!=nil{return e}
+ if e=atomicFile(filepath.Join(w.opts.Dir,"MANIFEST"),b);e!=nil{
+  w.failed=errors.Join(w.failed,fmt.Errorf("manifest commit outcome is uncertain: %w",e))
+  return e
+ }
+ w.manifest=next
+ return nil
+}
 func atomicFile(path string,b []byte)error{
  tmp:=path+".tmp";f,e:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600);if e!=nil{return e};if _,e=f.Write(b);e!=nil{f.Close();return e};if e=f.Sync();e!=nil{f.Close();return e};if e=f.Close();e!=nil{return e};if e=os.Rename(tmp,path);e!=nil{return e};d,e:=os.Open(filepath.Dir(path));if e!=nil{return e};defer d.Close();return d.Sync()
 }
