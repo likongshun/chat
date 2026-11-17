@@ -285,6 +285,7 @@ func TestWALStatsExposePendingCapacityAndSegments(t *testing.T) {
  if stats.AdmissionLimitBytes!=1536{t.Fatalf("admission limit=%d, want 1536",stats.AdmissionLimitBytes)}
  if stats.DiskBytes<=0||stats.DiskUsedRatio<=0{t.Fatalf("invalid disk stats: %+v",stats)}
  if stats.SegmentCount<2{t.Fatalf("segment count=%d, want rotated segments",stats.SegmentCount)}
+ if stats.AckSegmentCount<1{t.Fatalf("ACK segment count=%d, want at least one",stats.AckSegmentCount)}
 }
 
 
