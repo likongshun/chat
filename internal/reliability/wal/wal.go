@@ -23,16 +23,16 @@ func Open(o Options)(*WAL,error){
  if err:=os.MkdirAll(o.Dir,0700);err!=nil{return nil,err};l,err:=acquireLock(o.Dir);if err!=nil{return nil,err}
  w:=&WAL{opts:o,lock:l,next:1};fail:=func(e error)(*WAL,error){l.close();return nil,e}
  if err=ensureAckReserve(o.Dir,o.ReserveBytes);err!=nil&&!errors.Is(err,syscall.ENOSPC){return fail(err)}
- if err=w.loadManifest();err!=nil{return fail(err)};if err=w.repairActiveTails();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
+ if err=w.loadManifest();err!=nil{return fail(err)};if err=w.prepareAckSegments();err!=nil{return fail(err)};if err=w.repairActiveTails();err!=nil{return fail(err)};if err=w.recover();err!=nil{return fail(err)};if err=w.openActive();err!=nil{return fail(err)};return w,nil
 }
 func (w *WAL) loadManifest()error{
  b,e:=os.ReadFile(filepath.Join(w.opts.Dir,"MANIFEST"));if os.IsNotExist(e){w.manifest=Manifest{Version:1,FirstSegment:1,ActiveSegment:1};return nil};if e!=nil{return e}
- if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1&&w.manifest.Version!=2&&w.manifest.Version!=3{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.Version>=2{if w.manifest.Checksum==""{return fmt.Errorf("manifest checksum is required for version 2")};expected,err:=manifestChecksum(w.manifest);if err!=nil{return err};if !strings.EqualFold(expected,w.manifest.Checksum){return fmt.Errorf("manifest checksum mismatch")}};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};if w.manifest.Version>=3{if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required")};sum:=sha256.Sum256(cp);if !strings.EqualFold(hex.EncodeToString(sum[:]),w.manifest.CheckpointChecksum){return fmt.Errorf("checkpoint checksum mismatch")}};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
+ if e=json.Unmarshal(b,&w.manifest);e!=nil{return fmt.Errorf("manifest: %w",e)};if w.manifest.Version!=1&&w.manifest.Version!=2&&w.manifest.Version!=3&&w.manifest.Version!=4{return fmt.Errorf("unsupported manifest version %d",w.manifest.Version)};if w.manifest.FirstSegment==0||w.manifest.ActiveSegment<w.manifest.FirstSegment{return fmt.Errorf("invalid manifest segment range")};if w.manifest.Version>=2{if w.manifest.Checksum==""{return fmt.Errorf("manifest checksum is required for version 2")};expected,err:=manifestChecksum(w.manifest);if err!=nil{return err};if !strings.EqualFold(expected,w.manifest.Checksum){return fmt.Errorf("manifest checksum mismatch")}};if w.manifest.CheckpointSeq>0{cpPath:=checkpointPath(w.opts.Dir,w.manifest.CheckpointSeq);cp,e:=os.ReadFile(cpPath);if os.IsNotExist(e){cp,e=os.ReadFile(filepath.Join(w.opts.Dir,"checkpoint.json"))};if e!=nil{return fmt.Errorf("committed checkpoint missing: %w",e)};if w.manifest.Version>=3{if w.manifest.CheckpointChecksum==""{return fmt.Errorf("manifest checkpoint checksum is required")};sum:=sha256.Sum256(cp);if !strings.EqualFold(hex.EncodeToString(sum[:]),w.manifest.CheckpointChecksum){return fmt.Errorf("checkpoint checksum mismatch")}};var checkpoint Checkpoint;if e=json.Unmarshal(cp,&checkpoint);e!=nil{return fmt.Errorf("decode committed checkpoint: %w",e)};if checkpoint.Seq!=w.manifest.CheckpointSeq{return fmt.Errorf("checkpoint sequence %d does not match manifest %d",checkpoint.Seq,w.manifest.CheckpointSeq)}};return nil
 }
 func (w *WAL) repairActiveTails()error{
  paths:=[]string{
   filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment)),
-  filepath.Join(w.opts.Dir,"ack.wal"),
+  ackSegmentPath(w.opts.Dir, func() uint64 { if w.manifest.AckActiveSegment == 0 { return 1 }; return w.manifest.AckActiveSegment }()),
  }
  for _,p:=range paths{
   f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR,0600);if e!=nil{return e}
@@ -61,13 +61,13 @@ func (w *WAL) recover()error{
 		}
 	}
 	if _,e:=w.ackState();e!=nil{return fmt.Errorf("recover ACK log: %w",e)}
- if e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{var a Ack;if e:=json.Unmarshal(b,&a);e!=nil{return e};if a.Seq<=w.manifest.CheckpointSeq{return nil};id,ok:=eventIDs[a.Seq];if !ok{return fmt.Errorf("ACK references unknown sequence %d during recovery",a.Seq)};if id!=a.EventID{return fmt.Errorf("ACK event_id mismatch for sequence %d during recovery",a.Seq)};return nil});e!=nil{return fmt.Errorf("validate ACK references: %w",e)}
+ if e:=readAckFrames(w.opts.Dir,w.manifest,func(b []byte)error{var a Ack;if e:=json.Unmarshal(b,&a);e!=nil{return e};if a.Seq<=w.manifest.CheckpointSeq{return nil};id,ok:=eventIDs[a.Seq];if !ok{return fmt.Errorf("ACK references unknown sequence %d during recovery",a.Seq)};if id!=a.EventID{return fmt.Errorf("ACK event_id mismatch for sequence %d during recovery",a.Seq)};return nil});e!=nil{return fmt.Errorf("validate ACK references: %w",e)}
  w.next=max+1;if w.next==0{return fmt.Errorf("WAL sequence exhausted")};return nil
 }
 func (w *WAL) openActive()error{
  p:=filepath.Join(w.opts.Dir,fmt.Sprintf("data-%020d.wal",w.manifest.ActiveSegment));f,e:=os.OpenFile(p,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{return e}
  if e=repairFrameTail(p);e!=nil{f.Close();return e};w.data=f
- ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
+ ackPath:=ackSegmentPath(w.opts.Dir,w.manifest.AckActiveSegment)
  w.ack,e=os.OpenFile(ackPath,os.O_CREATE|os.O_RDWR|os.O_APPEND,0600);if e!=nil{f.Close();return e}
  if e=repairFrameTail(ackPath);e!=nil{f.Close();w.ack.Close();return e};return nil
 }
@@ -217,7 +217,7 @@ func (w *WAL) Ack(a Ack)error{
  if state[a.Sink][a.Seq]{return nil}
  // An ACK is considered committed only after the log sync succeeds.
  b,e:=json.Marshal(a);if e!=nil{return e}
- ackPath:=filepath.Join(w.opts.Dir,"ack.wal")
+ ackPath:=ackSegmentPath(w.opts.Dir,w.manifest.AckActiveSegment)
  if e=writeFrame(w.ack,b);e!=nil{
   if !errors.Is(e,syscall.ENOSPC){return e}
   if e=releaseAckReserve(w.opts.Dir);e!=nil{return fmt.Errorf("ACK write failed and reserve release failed: %w",e)}
@@ -234,7 +234,7 @@ func (w *WAL) Ack(a Ack)error{
 }
 func (w *WAL) ackState()(map[string]map[uint64]bool,error){
  acked:=map[string]map[uint64]bool{}
- e:=readFrames(filepath.Join(w.opts.Dir,"ack.wal"),func(b []byte)error{
+ e:=readAckFrames(w.opts.Dir,w.manifest,func(b []byte)error{
   var a Ack
   if e:=json.Unmarshal(b,&a);e!=nil{return fmt.Errorf("decode ACK record: %w",e)}
   if a.Seq==0||a.EventID==""||(a.Sink!="mqtt"&&a.Sink!="influx"){return fmt.Errorf("invalid ACK record")}
@@ -411,8 +411,8 @@ func (w *WAL) cleanupObsoleteSegments()error{
    changed=true
   }
  }
- if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();return syncFile(d)}
- return nil
+ if changed{d,e:=os.Open(w.opts.Dir);if e!=nil{return e};defer d.Close();if e=syncFile(d);e!=nil{return e}}
+ return w.cleanupObsoleteAckSegments()
 }
 
 func manifestChecksum(m Manifest)(string,error){
@@ -424,7 +424,7 @@ func manifestChecksum(m Manifest)(string,error){
 
 func (w *WAL) saveManifest()error{
  next:=w.manifest
- next.Version=3
+ next.Version=4
  next.CheckpointChecksum=""
  if next.CheckpointSeq>0{
   cpPath:=checkpointPath(w.opts.Dir,next.CheckpointSeq)
