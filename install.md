@@ -796,13 +796,18 @@ docker inspect "$(docker compose ps -q collector)" --format '{{json .State}}'
 
 当前 Dockerfile 使用 Go 1.23 构建。安装兼容版本的 Go 后：
 
+首次克隆后先生成并维护 Go 依赖校验文件 `go.sum`：
+
 ```bash
-go mod download
+go mod tidy
+go mod verify
 go test ./...
 go vet ./...
 go test -race ./internal/...
 go build ./cmd/...
 ```
+
+请将生成的 `go.sum` 与 `go.mod` 一并提交到版本库。不要通过设置 `GOSUMDB=off` 关闭模块校验来掩盖缺失的校验和。Docker 构建阶段也会执行 `go mod tidy` 和 `go mod verify`，以兼容当前尚未包含 `go.sum` 的检出版本。
 
 ### 12.2 本地启动
 
