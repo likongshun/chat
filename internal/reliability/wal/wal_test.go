@@ -1090,3 +1090,38 @@ func TestRecoveryFailsClosedOnNonEmptyUncommittedDataSegment(t *testing.T) {
 	}
 	if _, err = os.Stat(orphan); err != nil { t.Fatalf("non-empty orphan must be preserved for diagnosis: %v", err) }
 }
+
+
+func TestOpenAdoptsLegacyNonEmptyDataAndACKWithoutManifest(t *testing.T) {
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "data-00000000000000000001.wal")
+	dataFile, err := os.Create(dataPath)
+	if err != nil { t.Fatal(err) }
+	legacyRecord := Record{Seq: 1, EventID: "legacy-no-manifest", Payload: json.RawMessage(`{"v":1}`), CreatedAt: time.Now().UTC()}
+	raw, err := json.Marshal(legacyRecord)
+	if err != nil { t.Fatal(err) }
+	if err = writeFrame(dataFile, raw); err != nil { t.Fatal(err) }
+	if err = syncFile(dataFile); err != nil { t.Fatal(err) }
+	if err = dataFile.Close(); err != nil { t.Fatal(err) }
+
+	ackFile, err := os.Create(filepath.Join(dir, "ack.wal"))
+	if err != nil { t.Fatal(err) }
+	ackRaw, err := json.Marshal(Ack{Seq: 1, Sink: "mqtt", EventID: legacyRecord.EventID})
+	if err != nil { t.Fatal(err) }
+	if err = writeFrame(ackFile, ackRaw); err != nil { t.Fatal(err) }
+	if err = syncFile(ackFile); err != nil { t.Fatal(err) }
+	if err = ackFile.Close(); err != nil { t.Fatal(err) }
+
+	w, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, ReserveBytes: 4096, Sync: true})
+	if err != nil { t.Fatalf("adopt legacy WAL without manifest: %v", err) }
+	defer w.Close()
+	if w.manifest.Version != 5 || w.next != 2 { t.Fatalf("legacy WAL was not adopted: manifest=%+v next=%d", w.manifest, w.next) }
+	pending, err := w.PendingWithAcks()
+	if err != nil { t.Fatal(err) }
+	if len(pending) != 1 || pending[0].Seq != 1 || !pending[0].MQTTAcked || pending[0].InfluxAcked {
+		t.Fatalf("legacy per-sink ACK state was not recovered: %+v", pending)
+	}
+	record, err := w.Append("after-legacy-adoption", json.RawMessage(`{"v":2}`))
+	if err != nil { t.Fatal(err) }
+	if record.Seq != 2 { t.Fatalf("next sequence=%d, want 2", record.Seq) }
+}
