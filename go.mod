@@ -9,4 +9,4 @@ require github.com/eclipse/paho.mqtt.golang v1.5.0
 
 require github.com/jackc/pgx/v5 v5.7.2
 
-require go.bug.st/serial v1.8.0
+require go.bug.st/serial v1.6.4
