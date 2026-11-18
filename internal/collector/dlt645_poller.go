@@ -25,6 +25,7 @@ type DL645Poller struct {
 	Latest *LatestStore
 	ConfigVersion int64
 	Timeout time.Duration
+	Transport dlt645.Transport
 	mu sync.Mutex
 	gateways map[string]chan struct{}
 }
