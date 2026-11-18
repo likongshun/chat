@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/likongshun/chat/internal/config"
@@ -25,6 +26,8 @@ type DL645Poller struct {
 	Latest *LatestStore
 	ConfigVersion int64
 	Timeout time.Duration
+	mu sync.Mutex
+	gateways map[string]*sync.Mutex
 }
 
 func (p *DL645Poller) Protocol() string { return "dl-t645-2007" }
@@ -32,6 +35,14 @@ func (p *DL645Poller) Close() error { return nil }
 
 func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, error) {
 	if !d.Enabled { return nil,nil }
+	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
+	p.mu.Lock()
+	if p.gateways == nil { p.gateways = make(map[string]*sync.Mutex) }
+	lock := p.gateways[gateway]
+	if lock == nil { lock = &sync.Mutex{}; p.gateways[gateway] = lock }
+	p.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
 	address := strings.TrimSpace(d.MeterAddress)
 	if address == "" { return nil, fmt.Errorf("device %s: meter_address is required for DL/T645", d.ID) }
 	points:=make([]config.Point,0)
