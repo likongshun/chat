@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -104,11 +105,38 @@ func parseSerialEndpoint(endpoint string) (string, *serial.Mode, error) {
 type serialSession struct {
 	port serial.Port
 	closed chan struct{}
+	deadlineMu sync.Mutex
+	readDeadline time.Time
 	closeOnce sync.Once
 	closeErr error
 }
 
-func (s *serialSession) Read(p []byte) (int, error)  { return s.port.Read(p) }
+func (s *serialSession) Read(p []byte) (int, error) {
+	s.deadlineMu.Lock()
+	deadline := s.readDeadline
+	if !deadline.IsZero() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			s.deadlineMu.Unlock()
+			return 0, os.ErrDeadlineExceeded
+		}
+		if err := s.port.SetReadTimeout(remaining); err != nil {
+			s.deadlineMu.Unlock()
+			return 0, err
+		}
+	}
+	s.deadlineMu.Unlock()
+	n, err := s.port.Read(p)
+	if n == 0 && err == nil {
+		s.deadlineMu.Lock()
+		expired := !s.readDeadline.IsZero() && !time.Now().Before(s.readDeadline)
+		s.deadlineMu.Unlock()
+		if expired {
+			return 0, os.ErrDeadlineExceeded
+		}
+	}
+	return n, err
+}
 func (s *serialSession) Write(p []byte) (int, error) { return s.port.Write(p) }
 func (s *serialSession) Close() error {
 	s.closeOnce.Do(func() {
@@ -122,6 +150,9 @@ func (s *serialSession) RemoteAddr() net.Addr               { return serialAddr(
 func (s *serialSession) SetDeadline(t time.Time) error      { return s.SetReadDeadline(t) }
 func (s *serialSession) SetWriteDeadline(time.Time) error   { return nil }
 func (s *serialSession) SetReadDeadline(t time.Time) error {
+	s.deadlineMu.Lock()
+	s.readDeadline = t
+	s.deadlineMu.Unlock()
 	d := time.Until(t)
 	if t.IsZero() {
 		d = serial.NoTimeout
