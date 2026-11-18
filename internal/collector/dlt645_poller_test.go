@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"math"
