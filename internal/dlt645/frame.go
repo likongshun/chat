@@ -43,6 +43,7 @@ func EncodeReadData(address, dataID string) ([]byte, error) {
 
 
 func EncodeReadFollow(address, dataID string, sequence byte) ([]byte, error) {
+	if sequence == 0 { return nil, fmt.Errorf("follow-up sequence must be 1..255: %w", ErrFrame) }
 	addr, err := encodeAddress(address)
 	if err != nil { return nil, err }
 	id, err := hex.DecodeString(strings.TrimSpace(dataID))
