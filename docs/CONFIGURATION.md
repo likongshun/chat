@@ -31,7 +31,7 @@ Column lookup is header-based. Keep the sheet names and required headers stable 
 
 Set `Devices.protocol` to `dl-t645-2007`. For normal collection, configure the 12-digit decimal `meter_address`. The `host` and `port` identify a transparent TCP-to-RS485 gateway.
 
-For initial commissioning, set optional `discovery_only=TRUE` and leave `meter_address` empty. Discovery-only devices are not polled; they are available only for the explicit read-only address discovery action. After discovering the address, copy it into `meter_address` and set `discovery_only=FALSE` to enable collection. This prevents polling an unknown or placeholder address.
+For initial commissioning, set optional `discovery_only=TRUE` and leave `meter_address` empty. Discovery-only devices are not polled; they are available only for the explicit read-only address discovery action and may be configured before any measurement points exist. After discovering the address, copy it into `meter_address` and set `discovery_only=FALSE` to enable collection. This prevents polling an unknown or placeholder address.
 
 For a DL/T645 model, `Points` uses:
 
