@@ -8,6 +8,7 @@ import (
 
 type Device struct {
 	ID       string
+	Protocol string
 	Name     string
 	Host     string
 	Port     uint16
@@ -22,6 +23,7 @@ type Point struct {
 	DeviceID  string
 	Model     string
 	PointCode string
+	DataID    string
 	Name      string
 	Address   uint16
 	Count     uint16
