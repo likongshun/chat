@@ -215,7 +215,7 @@ func (s *Server) queryInflux(ctx context.Context,deviceID,pointCode string,from,
 	q:=base.Query();q.Set("org",s.Influx.Org);base.RawQuery=q.Encode()
 	windowSeconds:=int64(math.Ceil(to.Sub(from).Seconds()/float64(limit)))
 	if windowSeconds<1 {windowSeconds=1}
-	flux:=fmt.Sprintf("from(bucket: %s) |> range(start: time(v: %s), stop: time(v: %s)) |> filter(fn: (r) => r._measurement == \"modbus_point\" and r._field == \"value\" and r.device_id == %s and r.point_code == %s) |> aggregateWindow(every: %ds, fn: last, createEmpty: false) |> sort(columns: [\"_time\"], desc: true) |> limit(n: %d) |> sort(columns: [\"_time\"])",strconv.Quote(s.Influx.Bucket),strconv.Quote(from.Format(time.RFC3339Nano)),strconv.Quote(to.Format(time.RFC3339Nano)),strconv.Quote(deviceID),strconv.Quote(pointCode),windowSeconds,limit,offset)
+	flux:=fmt.Sprintf("from(bucket: %s) |> range(start: time(v: %s), stop: time(v: %s)) |> filter(fn: (r) => r._measurement == \"modbus_point\" and r._field == \"value\" and r.device_id == %s and r.point_code == %s) |> aggregateWindow(every: %ds, fn: last, createEmpty: false) |> sort(columns: [\"_time\"], desc: true) |> limit(n: %d, offset: %d) |> sort(columns: [\"_time\"])",strconv.Quote(s.Influx.Bucket),strconv.Quote(from.Format(time.RFC3339Nano)),strconv.Quote(to.Format(time.RFC3339Nano)),strconv.Quote(deviceID),strconv.Quote(pointCode),windowSeconds,limit,offset)
 	req,err:=http.NewRequestWithContext(ctx,http.MethodPost,base.String(),strings.NewReader(flux));if err!=nil{return nil,err}
 	req.Header.Set("Authorization","Token "+s.Influx.Token);req.Header.Set("Content-Type","application/vnd.flux");req.Header.Set("Accept","application/csv")
 	client:=s.InfluxClient;if client==nil {client=&http.Client{Timeout:10*time.Second}}
