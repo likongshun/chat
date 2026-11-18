@@ -20,7 +20,7 @@ func testDataServer(t *testing.T) (*Server,*collector.LatestStore) {
 	t.Helper()
 	cfg:=config.Config{
 		Devices:[]config.Device{{ID:"meter-1",Name:"主进线电表",Host:"127.0.0.1",Port:502,UnitID:1,Model:"meter",Interval:time.Second,Enabled:true}},
-		Points:[]config.Point{{ID:"meter/power",Model:"meter",PointCode:"power",Name:"有功功率",Address:10,Count:1,Function:3,DataType:"UINT16",Scale:1,Enabled:true}},
+		Points:[]config.Point{{ID:"meter/power",Model:"meter",PointCode:"power",Name:"有功功率",DataID:"00010000",Address:10,Count:1,Function:3,DataType:"UINT16",Scale:1,Enabled:true}},
 	}
 	manager,err:=config.NewManager(cfg);if err!=nil{t.Fatal(err)}
 	latest:=collector.NewLatestStore(100)
