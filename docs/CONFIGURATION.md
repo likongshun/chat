@@ -6,7 +6,7 @@ The collector uses `configs/modbus_device_config.xlsx` as the device-model catal
 
 | Sheet | Purpose | Important fields |
 |---|---|---|
-| Devices | Physical device instances | `device_id`, `name`, `host`, `port`, `unit_id`, `model`, `poll_ms`, `enabled` |
+| Devices | Physical device instances | `device_id`, `protocol`, `meter_address`, `discovery_only`, `name`, `host`, `port`, `model`, `poll_ms`, `enabled` |
 | Points | Register/bit definitions | `model`, `point_code`, `function`, `address`, `type`, `length/count`, `scale`, `offset`, `byte_order`, `word_order`, `unit`, `read_group`, `rw`, `enabled` |
 | Processing | Predefined post-decode operations | `point_code`, `operation`, `param1`, `param2` |
 | WriteRules | Explicit write permission constraints | `model`, `point_code`, `enabled`, `min`, `max`, `require_confirm` |
@@ -29,7 +29,9 @@ Column lookup is header-based. Keep the sheet names and required headers stable 
 
 ## DL/T645-2007 point rules
 
-Set `Devices.protocol` to `dl-t645-2007` and provide the 12-digit decimal `meter_address`. The `host` and `port` identify a transparent TCP-to-RS485 gateway.
+Set `Devices.protocol` to `dl-t645-2007`. For normal collection, configure the 12-digit decimal `meter_address`. The `host` and `port` identify a transparent TCP-to-RS485 gateway.
+
+For initial commissioning, set optional `discovery_only=TRUE` and leave `meter_address` empty. Discovery-only devices are not polled; they are available only for the explicit read-only address discovery action. After discovering the address, copy it into `meter_address` and set `discovery_only=FALSE` to enable collection. This prevents polling an unknown or placeholder address.
 
 For a DL/T645 model, `Points` uses:
 
@@ -37,20 +39,30 @@ For a DL/T645 model, `Points` uses:
 |---|---|
 | `data_id` | 8 hexadecimal digits, conventional DI3..DI0 notation |
 | `type` | `BCD` or `BCD_SIGNED` |
-| `length` | number of data bytes after the four-byte data identifier |
+| `length` | number of data bytes after the four-byte data identifier; 1..4096 |
 | `scale` | engineering multiplier |
 | `offset` | engineering offset |
 | `unit` | engineering unit |
 
-`address`, `function`, `byte_order` and `word_order` are Modbus fields and are not used by the DL/T645 reader. A DL/T645 point must have an explicit data length from 1 to 32 bytes.
+`address`, `function`, `byte_order` and `word_order` are Modbus fields and are not used by the DL/T645 reader. Excel column `discovery_only` is optional and defaults to FALSE.
 
-The current reader supports single-frame read-data responses only. It validates the meter address, data identifier, frame length, checksum, BCD digits and response control code. A response marked as requiring additional frames is rejected rather than being treated as complete data.
+### Data identifier templates
 
-Example:
+The read-only catalog is available at `GET /api/v1/dlt645/templates?q=电能`. It currently includes common total-energy and phase voltage/current identifiers. The catalog provides suggested lengths/scales, not a substitute for the meter manual. Manufacturer firmware may vary in supported IDs, byte lengths, decimal places and signed representation.
 
-| model | point_code | data_id | type | length | scale | unit |
-|---|---|---|---|---:|---:|---|
-| METER_DLT645 | energy_total | 00010000 | BCD | 3 | 0.01 | kWh |
+### Multi-frame responses
+
+The reader supports DL/T645-2007 multi-frame read responses. When the first response uses `B1H`, it requests subsequent frames with `12H`, validates each `92H/B2H` response, DI and sequence number, and assembles the data before decoding. It bounds the exchange to 32 follow-up frames and 4096 assembled data bytes. Incomplete, malformed, out-of-order or over-limit responses never produce a good-quality sample.
+
+### Meter address discovery
+
+The dashboard's **搜索电表地址** action calls `POST /api/v1/dlt645/discover` with a configured DL/T645 device ID. It sends the standard `13H` read-communication-address command using the `AA..AA` address field and validates the `93H` response.
+
+The standard defines this command as point-to-point. **Isolate one meter on the RS485 segment before searching**; do not run discovery on a shared multidrop bus where multiple meters may answer simultaneously. The operation is read-only and does not change the meter or configuration. Copy the returned address into the Devices sheet and disable `discovery_only` when ready to collect.
+
+### Transport abstraction
+
+The DL/T645 poller now depends on a session/transport interface. The TCP gateway transport is implemented. A native Linux serial/RS485 adapter can implement the same session interface; the hardware serial driver and Docker device mapping are not yet included in this release.
 
 The exact `data_id`, data length, scale and signed representation must be taken from the meter manufacturer's DL/T645-2007 communication specification. Do not assume that two meter models expose identical data identifiers.
 
