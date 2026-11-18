@@ -36,6 +36,7 @@ func TestEncodeRejectsInvalidInputs(t *testing.T) {
 }
 
 func TestEncodeReadFollow(t *testing.T) {
+	if _, err := EncodeReadFollow("123456789012", "00010000", 0); err == nil { t.Fatal("expected zero sequence rejection") }
 	req, err := EncodeReadFollow("123456789012", "00010000", 1)
 	if err != nil { t.Fatal(err) }
 	if req[8] != ReadFollow || req[9] != 5 || req[len(req)-1] != FrameEnd { t.Fatalf("bad follow request: %x", req) }
