@@ -3,6 +3,7 @@ package dlt645
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -26,4 +27,15 @@ func (TCPTransport) Open(ctx context.Context, endpoint string, timeout time.Dura
 	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", endpoint)
 	if err != nil { return nil, err }
 	return conn, nil
+}
+
+// DefaultTransport routes serial:// endpoints to the local serial adapter and
+// all other endpoints to the existing transparent TCP gateway.
+type DefaultTransport struct{}
+
+func (DefaultTransport) Open(ctx context.Context, endpoint string, timeout time.Duration) (Session, error) {
+	if strings.HasPrefix(endpoint, "serial://") {
+		return (SerialTransport{}).Open(ctx, endpoint, timeout)
+	}
+	return (TCPTransport{}).Open(ctx, endpoint, timeout)
 }
