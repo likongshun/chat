@@ -20,6 +20,7 @@ type Server struct {
 	Addr      string
 	Config    *config.Manager
 	Latest    *collector.LatestStore
+	DLT645    *collector.DL645Poller
 	Influx    *InfluxQueryOptions
 	InfluxClient *http.Client
 	Collector *collector.Metrics
