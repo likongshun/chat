@@ -63,6 +63,8 @@ func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (strin
 	conn, err := transport.Open(ctx, gateway, timeout)
 	if err != nil { return "", err }
 	defer conn.Close()
+	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopCancel()
 	deadline := time.Now().Add(timeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
 	if err := conn.SetDeadline(deadline); err != nil { return "", err }
@@ -100,6 +102,8 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 			conn, dialErr := (&net.Dialer{Timeout:timeout}).DialContext(ctx, "tcp", gateway)
 			err = dialErr
 			if err == nil {
+				stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
+				defer stopCancel()
 				deadline := time.Now().Add(timeout)
 				if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
 				_ = conn.SetDeadline(deadline)
