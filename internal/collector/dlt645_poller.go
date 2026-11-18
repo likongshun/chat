@@ -137,8 +137,8 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 				stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
 				deadline := time.Now().Add(timeout)
 				if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
-				_ = conn.SetDeadline(deadline)
-				err = writeAll(conn, request)
+				err = conn.SetDeadline(deadline)
+				if err == nil { err = writeAll(conn, request) }
 				if err == nil {
 					var frame dlt645.Frame
 					frame, err = read645Frame(conn, address)
