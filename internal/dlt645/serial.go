@@ -24,40 +24,9 @@ func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.D
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "serial" {
-		return nil, fmt.Errorf("invalid serial endpoint %q", endpoint)
-	}
-	device := filepath.Clean(u.Path)
-	if !filepath.IsAbs(device) || device == "/" || strings.Contains(device, "/../") {
-		return nil, fmt.Errorf("serial device path must be an absolute device path")
-	}
-	q := u.Query()
-	baud, err := queryInt(q.Get("baud"), 9600)
-	if err != nil || baud < 300 || baud > 4_000_000 {
-		return nil, fmt.Errorf("serial baud must be an integer in 300..4000000")
-	}
-	dataBits, err := queryInt(q.Get("data_bits"), 8)
-	if err != nil || dataBits < 5 || dataBits > 8 {
-		return nil, fmt.Errorf("serial data_bits must be 5..8")
-	}
-	stopBits, err := queryInt(q.Get("stop_bits"), 1)
-	if err != nil || (stopBits != 1 && stopBits != 2) {
-		return nil, fmt.Errorf("serial stop_bits must be 1 or 2")
-	}
-	mode := &serial.Mode{BaudRate: baud, DataBits: dataBits, StopBits: serial.OneStopBit}
-	if stopBits == 2 {
-		mode.StopBits = serial.TwoStopBits
-	}
-	switch strings.ToLower(q.Get("parity")) {
-	case "", "none", "n":
-		mode.Parity = serial.NoParity
-	case "even", "e":
-		mode.Parity = serial.EvenParity
-	case "odd", "o":
-		mode.Parity = serial.OddParity
-	default:
-		return nil, fmt.Errorf("serial parity must be none, even or odd")
+	device, mode, err := parseSerialEndpoint(endpoint)
+	if err != nil {
+		return nil, err
 	}
 	port, err := serial.Open(device, mode)
 	if err != nil {
@@ -79,6 +48,57 @@ func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.D
 		}
 	}()
 	return s, nil
+}
+
+func parseSerialEndpoint(endpoint string) (string, *serial.Mode, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "serial" || u.Host != "" || u.User != nil || u.Fragment != "" {
+		return "", nil, fmt.Errorf("invalid serial endpoint %q", endpoint)
+	}
+	device := filepath.Clean(u.Path)
+	if !filepath.IsAbs(device) || !strings.HasPrefix(device, "/dev/") || device == "/dev" {
+		return "", nil, fmt.Errorf("serial device path must be an absolute /dev path")
+	}
+	for _, part := range strings.Split(u.Path, "/") {
+		if part == ".." {
+			return "", nil, fmt.Errorf("serial device path traversal is not allowed")
+		}
+	}
+	for key := range u.Query() {
+		switch key {
+		case "baud", "data_bits", "parity", "stop_bits":
+		default:
+			return "", nil, fmt.Errorf("unknown serial option %q", key)
+		}
+	}
+	q := u.Query()
+	baud, err := queryInt(q.Get("baud"), 9600)
+	if err != nil || baud < 300 || baud > 4000000 {
+		return "", nil, fmt.Errorf("serial baud must be an integer in 300..4000000")
+	}
+	dataBits, err := queryInt(q.Get("data_bits"), 8)
+	if err != nil || dataBits < 5 || dataBits > 8 {
+		return "", nil, fmt.Errorf("serial data_bits must be 5..8")
+	}
+	stopBits, err := queryInt(q.Get("stop_bits"), 1)
+	if err != nil || (stopBits != 1 && stopBits != 2) {
+		return "", nil, fmt.Errorf("serial stop_bits must be 1 or 2")
+	}
+	mode := &serial.Mode{BaudRate: baud, DataBits: dataBits, StopBits: serial.OneStopBit}
+	if stopBits == 2 {
+		mode.StopBits = serial.TwoStopBits
+	}
+	switch strings.ToLower(q.Get("parity")) {
+	case "", "none", "n":
+		mode.Parity = serial.NoParity
+	case "even", "e":
+		mode.Parity = serial.EvenParity
+	case "odd", "o":
+		mode.Parity = serial.OddParity
+	default:
+		return "", nil, fmt.Errorf("serial parity must be none, even or odd")
+	}
+	return device, mode, nil
 }
 
 type serialSession struct {
