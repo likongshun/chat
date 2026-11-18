@@ -11,6 +11,7 @@ type Device struct {
 	ID       string
 	Protocol string
 	MeterAddress string
+	DiscoveryOnly bool
 	Name     string
 	Host     string
 	Port     uint16
@@ -95,7 +96,8 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate device id %q", d.ID)
 		}
 		if d.Protocol != "" && d.Protocol != "modbus-tcp" && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: unsupported protocol %q", d.ID, d.Protocol) }
-		if d.Protocol == "dl-t645-2007" && (len(d.MeterAddress) != 12 || !allDigits(d.MeterAddress)) { return fmt.Errorf("device %s: DL/T645 meter_address must be 12 decimal digits", d.ID) }
+		if d.Protocol == "dl-t645-2007" && !d.DiscoveryOnly && (len(d.MeterAddress) != 12 || !allDigits(d.MeterAddress)) { return fmt.Errorf("device %s: DL/T645 meter_address must be 12 decimal digits unless discovery_only is enabled", d.ID) }
+		if d.DiscoveryOnly && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: discovery_only is only valid for DL/T645", d.ID) }
 		if d.Port == 0 || d.Interval < 100*time.Millisecond {
 			return fmt.Errorf("device %s: port must be set and interval must be >=100ms", d.ID)
 		}
