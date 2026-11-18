@@ -27,15 +27,15 @@ type Frame struct {
 }
 
 // EncodeReadData builds a master read-data request. Address must contain
-// exactly 12 decimal digits. dataID is the four-byte identifier written as
-// eight hexadecimal digits in protocol byte order (least-significant byte first).
+// exactly 12 decimal digits. dataID is the conventional DI3..DI0 hexadecimal notation; the request
+// transmits the four identifier bytes in DL/T645 wire order DI0..DI3.
 func EncodeReadData(address, dataID string) ([]byte, error) {
 	addr, err := encodeAddress(address)
 	if err != nil { return nil, err }
 	id, err := hex.DecodeString(strings.TrimSpace(dataID))
 	if err != nil || len(id) != 4 { return nil, fmt.Errorf("data identifier must be 8 hexadecimal digits: %w", ErrFrame) }
 	payload := make([]byte, 4)
-	for i := range id { payload[i] = id[i] + 0x33 }
+	for i := range id { payload[i] = id[3-i] + 0x33 }
 	return encodeFrame(addr, ReadData, payload), nil
 }
 
