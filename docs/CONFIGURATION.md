@@ -27,6 +27,33 @@ Column lookup is header-based. Keep the sheet names and required headers stable 
 - Supported word order values: HIGH_LOW, LOW_HIGH.
 - Adjacent/overlapping points are batch-read only when function, model and read group are compatible.
 
+## DL/T645-2007 point rules
+
+Set `Devices.protocol` to `dl-t645-2007` and provide the 12-digit decimal `meter_address`. The `host` and `port` identify a transparent TCP-to-RS485 gateway.
+
+For a DL/T645 model, `Points` uses:
+
+| Field | Meaning |
+|---|---|
+| `data_id` | 8 hexadecimal digits, conventional DI3..DI0 notation |
+| `type` | `BCD` or `BCD_SIGNED` |
+| `length` | number of data bytes after the four-byte data identifier |
+| `scale` | engineering multiplier |
+| `offset` | engineering offset |
+| `unit` | engineering unit |
+
+`address`, `function`, `byte_order` and `word_order` are Modbus fields and are not used by the DL/T645 reader. A DL/T645 point must have an explicit data length from 1 to 32 bytes.
+
+The current reader supports single-frame read-data responses only. It validates the meter address, data identifier, frame length, checksum, BCD digits and response control code. A response marked as requiring additional frames is rejected rather than being treated as complete data.
+
+Example:
+
+| model | point_code | data_id | type | length | scale | unit |
+|---|---|---|---|---:|---:|---|
+| METER_DLT645 | energy_total | 00010000 | BCD | 3 | 0.01 | kWh |
+
+The exact `data_id`, data length, scale and signed representation must be taken from the meter manufacturer's DL/T645-2007 communication specification. Do not assume that two meter models expose identical data identifiers.
+
 ## Processing operators
 
 Processing is a fixed allow-list; arbitrary formulas, scripts, and code are never evaluated.
