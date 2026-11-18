@@ -40,6 +40,10 @@ func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.D
 		_ = port.Close()
 		return nil, fmt.Errorf("set serial read timeout: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		_ = port.Close()
+		return nil, err
+	}
 	s := &serialSession{port: port, closed: make(chan struct{})}
 	go func() {
 		select {
