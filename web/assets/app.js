@@ -33,13 +33,13 @@ function renderDevices(){
  set('device-page-info',filtered.length?((devicePage-1)*devicePageSize+1)+'-'+Math.min(devicePage*devicePageSize,filtered.length)+' / '+filtered.length:'0 / 0');
  $('device-prev').disabled=devicePage<=1;
  $('device-next').disabled=devicePage>=pages;
- if(!visible.length){const tr=document.createElement('tr');cell(tr,devices.length?'没有匹配的设备':'当前配置没有设备','td','empty');body.appendChild(tr);return}
+ if(!visible.length){const tr=document.createElement('tr');const empty=cell(tr,devices.length?'没有匹配的设备':'当前配置没有设备','td','empty');empty.colSpan=6;body.appendChild(tr);return}
  for(const d of visible){
   const tr=document.createElement('tr');
   if(d.id===selectedDevice)tr.style.background='#f2f7ff';
   const name=cell(tr);
   const b=document.createElement('button');b.className='table-action';b.textContent=(d.name||d.id)+' · '+d.id;b.addEventListener('click',()=>selectDevice(d.id));name.appendChild(b);
-  cell(tr,d.model);cell(tr,d.host+':'+d.port);cell(tr,fmt(d.point_count));
+  cell(tr,d.protocol==='dl-t645-2007'?'DL/T645-2007':'Modbus TCP');cell(tr,d.model);cell(tr,d.host+':'+d.port);cell(tr,fmt(d.point_count));
   const fresh=d.last_seen&&Date.now()-new Date(d.last_seen).getTime()<Math.max(10000,(d.interval_ms||1000)*3);
   cell(tr,d.enabled?(fresh?'在线':'等待数据'):'已禁用','td',d.enabled?(fresh?'state-good':''):'state-bad');
   body.appendChild(tr);
@@ -51,6 +51,22 @@ function chooseHistoryPoint(code){selectedPoint=code;$('history-point').value=co
 function drawHistory(rows){const values=rows.map(x=>Number(x.value)).filter(Number.isFinite);if(values.length<2){$('history-line').setAttribute('d','');$('history-area').setAttribute('d','');return}const min=Math.min(...values),max=Math.max(...values),span=max-min||1;const pts=values.map((v,i)=>[i*900/Math.max(1,values.length-1),225-(v-min)/span*195]);const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');$('history-line').setAttribute('d',d);$('history-area').setAttribute('d',d+' L900 250 L0 250 Z');set('history-minmax','最小值 '+min+' · 最大值 '+max)}
 async function queryHistory(){const device=$('history-device').value,point=$('history-point').value;if(!device||!point){toast('请先选择设备和测点');return}selectedDevice=device;selectedPoint=point;const hours=Number($('history-range').value||24);const to=new Date(),from=new Date(to.getTime()-hours*3600000);const params=new URLSearchParams({device_id:device,point_id:point,from:from.toISOString(),to:to.toISOString(),limit:'1000'});set('history-status','正在查询…');try{const response=await fetch('/api/v1/telemetry?'+params.toString(),{cache:'no-store'});if(!response.ok){let message='HTTP '+response.status;try{message=(await response.text())||message}catch{}throw Error(message)}historyRows=await response.json();renderHistory();set('history-status','查询完成 · '+historyRows.length+' 条')}catch(e){set('history-status','查询失败');const body=clearBody('history-body');const tr=document.createElement('tr');cell(tr,'历史查询失败：'+e.message,'td','empty');body.appendChild(tr);$('history-line').setAttribute('d','');$('history-area').setAttribute('d','')}}
 function renderHistory(){const body=clearBody('history-body');set('history-points-count',historyRows.length+' 个数据点');if(!historyRows.length){const tr=document.createElement('tr');cell(tr,'该时间范围内没有历史记录','td','empty');body.appendChild(tr);$('history-line').setAttribute('d','');$('history-area').setAttribute('d','');set('history-minmax','最小值 — · 最大值 —');return}for(const row of historyRows.slice().reverse()){const tr=document.createElement('tr');cell(tr,localTime(row.timestamp));cell(tr,String(row.value));cell(tr,row.quality||'—','td',row.quality==='good'?'state-good':'');body.appendChild(tr)}drawHistory(historyRows)}
+
+async function discoverSelectedMeter(){
+ const device=devices.find(d=>d.id===selectedDevice);
+ if(!device){toast('请先选择设备');return}
+ if(device.protocol!=='dl-t645-2007'){toast('请选择 DL/T645-2007 电表设备');return}
+ const button=$('meter-discover');button.disabled=true;set('meter-discover-result','正在搜索…');
+ try{
+  const response=await fetch('/api/v1/dlt645/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:device.id})});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw Error(data.error||'HTTP '+response.status);
+  set('meter-discover-result','发现地址：'+data.address);
+  toast('电表地址搜索成功：'+data.address);
+ }catch(e){set('meter-discover-result','搜索失败');toast('电表搜索失败：'+e.message)}
+ finally{button.disabled=false}
+}
+$('meter-discover').addEventListener('click',discoverSelectedMeter);
 $('refresh').addEventListener('click',()=>{refresh();loadDevices();toast('正在刷新数据')});
 $('devices-refresh').addEventListener('click',loadDevices);
 $('device-search').addEventListener('input',e=>{deviceQuery=e.target.value.trim();devicePage=1;renderDevices()});
