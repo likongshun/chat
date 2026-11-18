@@ -111,3 +111,13 @@ func TestDLT645MeterDiscoveryRejectsUnknownDevice(t *testing.T) {
 	server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodPost,"/api/v1/dlt645/discover",strings.NewReader(`{"device_id":"missing"}`)))
 	if response.Code!=http.StatusNotFound { t.Fatalf("status=%d body=%s",response.Code,response.Body.String()) }
 }
+
+func TestDLT645TemplateSearchAPI(t *testing.T) {
+	server,_ := testDataServer(t)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodGet,"/api/v1/dlt645/templates?q=正向有功",nil))
+	if response.Code!=http.StatusOK || !strings.Contains(response.Body.String(),`"id":"00010000"`) { t.Fatalf("template search response %d: %s",response.Code,response.Body.String()) }
+	method := httptest.NewRecorder()
+	server.Handler().ServeHTTP(method,httptest.NewRequest(http.MethodPost,"/api/v1/dlt645/templates",nil))
+	if method.Code!=http.StatusMethodNotAllowed { t.Fatalf("method status=%d",method.Code) }
+}
