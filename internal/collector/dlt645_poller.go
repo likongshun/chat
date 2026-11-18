@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -66,32 +67,21 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 			if err==nil {
 				deadline:=time.Now().Add(timeout); if dl,ok:=ctx.Deadline(); ok && dl.Before(deadline) { deadline=dl }
 				_ = conn.SetDeadline(deadline)
-				_,err=conn.Write(request)
+				_,err=io.Copy(conn,bytes.NewReader(request))
 				if err==nil {
-					header:=make([]byte,10)
-					_,err=io.ReadFull(conn,header)
+					var frame dlt645.Frame
+					frame,err=read645Frame(conn,address)
 					if err==nil {
-						n:=int(header[9])
-						if n>200 { err=fmt.Errorf("DL/T645 response length %d exceeds limit",n) } else {
-							raw:=make([]byte,12+n)
-							copy(raw,header)
-							_,err=io.ReadFull(conn,raw[10:])
-							if err==nil {
-								var frame dlt645.Frame
-								frame,err=dlt645.DecodeResponse(raw,address)
-								if err==nil {
-									if frame.Control&0x40!=0 { err=fmt.Errorf("meter returned DL/T645 error response") } else {
-										decoded,decodeErr:=decode645Value(frame.Data,pt.DataID,pt.Scale,pt.Offset)
-										if decodeErr!=nil { err=decodeErr } else {
-											var value any = decoded
-											value,err=processing.Apply(pt.PointCode,value,p.Config.Processing,p.Config.Enums)
-											if err==nil { s.Value=value }
-										}
-									}
-								}
+						if frame.Control&0x40!=0 { err=fmt.Errorf("meter returned DL/T645 error response") } else {
+							decoded,decodeErr:=decode645Value(frame.Data,pt.DataID,pt.Scale,pt.Offset)
+							if decodeErr!=nil { err=decodeErr } else {
+								var value any = decoded
+								value,err=processing.Apply(pt.PointCode,value,p.Config.Processing,p.Config.Enums)
+								if err==nil { s.Value=value }
 							}
 						}
 					}
+				}
 				}
 				_ = conn.Close()
 			}
@@ -120,4 +110,24 @@ func decode645Value(data []byte, expectedID string, scale, offset float64) (floa
 
 func reverseDigits(in []byte) []byte {
 	out:=make([]byte,len(in)); for i:=range in { out[len(in)-1-i]=in[i] }; return out
+}
+
+func read645Frame(r io.Reader, expectedAddress string) (dlt645.Frame, error) {
+	// Some optical/RS485 adapters prepend one or more 0xFE wake-up bytes.
+	var start [1]byte
+	for i:=0; i<16; i++ {
+		if _,err:=io.ReadFull(r,start[:]); err!=nil { return dlt645.Frame{},err }
+		if start[0]==dlt645.FrameStart { break }
+		if i==15 { return dlt645.Frame{},dlt645.ErrFrame }
+	}
+	header:=make([]byte,9)
+	if _,err:=io.ReadFull(r,header); err!=nil { return dlt645.Frame{},err }
+	if header[6]!=dlt645.FrameStart { return dlt645.Frame{},dlt645.ErrFrame }
+	n:=int(header[8])
+	if n>200 { return dlt645.Frame{},fmt.Errorf("DL/T645 response length %d exceeds limit",n) }
+	raw:=make([]byte,10+n+2)
+	raw[0]=dlt645.FrameStart
+	copy(raw[1:10],header)
+	if _,err:=io.ReadFull(r,raw[10:]); err!=nil { return dlt645.Frame{},err }
+	return dlt645.DecodeResponse(raw,expectedAddress)
 }
