@@ -26,7 +26,7 @@
 
 ## 1. 项目简介
 
-本项目是基于 Go 的多协议数据采集平台。当前包含 Modbus TCP 和 DL/T645-2007（透明 TCP-RS485 网关）采集引擎。设备协议、型号、寄存器/数据标识和处理规则由 Excel 工作簿定义，各协议采集器输出统一采样模型并共用持久化、消息投递和数据展示链路。
+本项目是基于 Go 的多协议数据采集平台。当前包含 Modbus TCP 和 DL/T645-2007 采集引擎；DL/T645 支持透明 TCP-RS485 网关和 Linux 本地串口两种传输方式。设备协议、型号、寄存器/数据标识和处理规则由 Excel 工作簿定义，各协议采集器输出统一采样模型并共用持久化、消息投递和数据展示链路。
 
 当前工程包含以下主要能力：
 
@@ -446,7 +446,7 @@ Sheet 名称和必需列标题应保持稳定。列名按表头匹配，不要�
 支持的协议标识：
 
 - `modbus-tcp`：Modbus TCP 引擎。
-- `dl-t645-2007`：DL/T645-2007 电能表引擎。当前默认使用透明 TCP-RS485 网关，`host`/`port` 填网关地址，网关必须透传原始字节流。
+- `dl-t645-2007`：DL/T645-2007 电能表引擎。`transport=tcp` 使用透明 TCP-RS485 网关，`host`/`port` 填网关地址；`transport=serial` 使用 Linux 本地 `/dev/ttyUSB*`、`/dev/ttyACM*` 或 `/dev/serial/by-id/...` 串口设备。旧配置不填写 `transport` 时默认 TCP。
 
 ### 7.1 DL/T645 测点配置
 
@@ -500,7 +500,42 @@ DL/T645 测点使用独立字段，不使用 Modbus 的寄存器地址语义：
 
 读数据首帧若返回 `B1H`，引擎会发送 `12H` 续读请求，并校验 `92H/B2H` 应答、DI 和帧序号后拼接数据。单次响应限制为最多 32 个后续帧、拼接数据最多 4096 字节；缺帧、乱序、超长或校验失败均不会生成正常质量样本。
 
-DL/T645 poller 已通过 Session/Transport 接口隔离物理传输。当前实现 TCP 网关 Transport；接口可供后续 Linux 原生串口/RS485 适配器实现。原生串口驱动、波特率/校验位/停止位配置和 Compose 设备映射尚未包含在本版本中。
+DL/T645 poller 已通过 Session/Transport 接口隔离物理传输，当前实现 TCP 网关和基于 `go.bug.st/serial` 的本地串口 Transport。Devices 可选列：
+
+| 字段 | 默认值 | 说明 |
+|---|---:|---|
+| `transport` | `tcp` | `tcp` 或 `serial` |
+| `serial_port` | 空 | Linux 设备路径，如 `/dev/ttyUSB0` 或 `/dev/serial/by-id/...` |
+| `baud_rate` | 9600 | 波特率 |
+| `data_bits` | 8 | 5..8 |
+| `parity` | `even` | `none`、`even`、`odd` |
+| `stop_bits` | 1 | 1 或 2 |
+
+直接串口示例（Devices）：
+
+| device_id | protocol | transport | serial_port | baud_rate | data_bits | parity | stop_bits | meter_address |
+|---|---|---|---|---:|---:|---|---:|---|
+| meter-01 | dl-t645-2007 | serial | /dev/ttyUSB0 | 2400 | 8 | even | 1 | 123456789012 |
+
+本地串口部署使用单独的 Compose overlay，不影响默认 TCP 部署：
+
+```bash
+# 查看 USB-RS485 设备和所属组
+ls -l /dev/ttyUSB0
+stat -c '%g' /dev/ttyUSB0
+
+# 设置宿主机设备路径、容器内路径和设备组数字 GID
+export RS485_DEVICE=/dev/ttyUSB0
+export RS485_CONTAINER_DEVICE=/dev/ttyUSB0
+export RS485_GID=$(stat -c '%g' "$RS485_DEVICE")
+
+# 用 overlay 构建并启动
+docker compose -f compose.yaml -f compose.serial.yaml up -d --build
+```
+
+容器只映射指定设备并追加该设备的数字组 ID，不启用 `privileged: true`。若容器内设备路径不同，Excel 的 `serial_port` 必须填写容器内路径。宿主机用户/设备权限仍需按发行版 udev 规则配置。
+
+**硬件边界：** 当前串口实现覆盖常见 USB-RS485 自动收发方向适配器；需要 GPIO 或 Linux `TIOCSRS485` ioctl 控制方向的 UART/RS485 板卡，仍需专用驱动适配。波特率、校验位和停止位必须与电表及转换器一致。一个物理串口无论被多少个 Device 配置引用，采集和地址发现都会按串口路径共用互斥锁。真实设备连通性、转换器方向控制和电气隔离仍须在目标硬件上验收。
 
 所有协议继续输出统一 Sample，并共用 WAL、MQTT、InfluxDB 和 Web 遥测查询链路。当前 DL/T645 只提供读取和地址发现，不提供写数据、写地址、广播控制或参数设置命令。
 
