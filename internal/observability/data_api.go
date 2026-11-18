@@ -172,7 +172,7 @@ func (s *Server) devicePoints(w http.ResponseWriter,r *http.Request) {
 	items:=make([]pointView,0)
 	for _,p:=range pointsByModel[device.Model] {
 		if !p.Enabled {continue}
-		item:=pointView{ID:p.ID,Code:p.PointCode,Name:p.Name,Address:p.Address,Function:p.Function,DataType:p.DataType,Unit:p.Unit,Enabled:p.Enabled}
+		item:=pointView{ID:p.ID,Code:p.PointCode,Name:p.Name,DataID:p.DataID,Address:p.Address,Function:p.Function,DataType:p.DataType,Unit:p.Unit,Enabled:p.Enabled}
 		if v,ok:=latest[p.PointCode];ok { sample:=v;item.Latest=&sample }
 		items=append(items,item)
 	}
