@@ -75,7 +75,7 @@ Optional Devices columns for native serial transport:
 | `parity` | `even` | `none`, `even`, or `odd` |
 | `stop_bits` | 1 | 1 or 2 stop bits |
 
-The serial adapter enforces an absolute read deadline, closes the session when its context is cancelled, and serializes collection/discovery across all Device entries that refer to the same physical serial path. It does not enable container-wide privileged mode.
+The serial adapter enforces absolute read and write deadlines (a timed-out write closes the session), closes the session when its context is cancelled, drains outbound bytes before switching to receive, and serializes collection/discovery across all Device entries that refer to the same physical serial path. Linux CI exercises the adapter over pseudo-terminals, including bidirectional I/O, deadlines, cancellation, and reopening a closed session. This is not a substitute for validation with the target USB-RS485 adapter and meter. It does not enable container-wide privileged mode.
 
 For Compose, use the optional overlay:
 
