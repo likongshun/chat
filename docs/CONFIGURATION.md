@@ -29,7 +29,7 @@ Column lookup is header-based. Keep the sheet names and required headers stable 
 
 ## DL/T645-2007 point rules
 
-Set `Devices.protocol` to `dl-t645-2007`. For normal collection, configure the 12-digit decimal `meter_address`. The `host` and `port` identify a transparent TCP-to-RS485 gateway.
+Set `Devices.protocol` to `dl-t645-2007`. For normal collection, configure the 12-digit decimal `meter_address`. By default `transport=tcp` and `host`/`port` identify a transparent TCP-to-RS485 gateway. Set `transport=serial` to use a local Linux serial device instead; then `serial_port` must identify the device path inside the collector container.
 
 For initial commissioning, set optional `discovery_only=TRUE` and leave `meter_address` empty. Discovery-only devices are not polled; they are available only for the explicit read-only address discovery action and may be configured before any measurement points exist. After discovering the address, copy it into `meter_address` and set `discovery_only=FALSE` to enable collection. This prevents polling an unknown or placeholder address.
 
@@ -62,7 +62,31 @@ The standard defines this command as point-to-point. **Isolate one meter on the 
 
 ### Transport abstraction
 
-The DL/T645 poller now depends on a session/transport interface. The TCP gateway transport is implemented. A native Linux serial/RS485 adapter can implement the same session interface; the hardware serial driver and Docker device mapping are not yet included in this release.
+The DL/T645 poller uses a session/transport interface with both transparent TCP gateway and native serial implementations.
+
+Optional Devices columns for native serial transport:
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `transport` | `tcp` | `tcp` or `serial` |
+| `serial_port` | empty | Linux path such as `/dev/ttyUSB0` or `/dev/serial/by-id/...` |
+| `baud_rate` | 9600 | Serial baud rate |
+| `data_bits` | 8 | 5..8 data bits |
+| `parity` | `even` | `none`, `even`, or `odd` |
+| `stop_bits` | 1 | 1 or 2 stop bits |
+
+The serial adapter enforces an absolute read deadline, closes the session when its context is cancelled, and serializes collection/discovery across all Device entries that refer to the same physical serial path. It does not enable container-wide privileged mode.
+
+For Compose, use the optional overlay:
+
+```bash
+export RS485_DEVICE=/dev/ttyUSB0
+export RS485_CONTAINER_DEVICE=/dev/ttyUSB0
+export RS485_GID=$(stat -c '%g' "$RS485_DEVICE")
+docker compose -f compose.yaml -f compose.serial.yaml up -d --build
+```
+
+The overlay maps only the selected host device and adds its numeric group ID. Configure `serial_port` using the container path. USB-RS485 adapters with automatic transmit/receive direction are supported; hardware requiring GPIO or Linux `TIOCSRS485` direction control still needs a dedicated adapter. Real device timing, isolation and bus behavior must be validated on the target hardware.
 
 The exact `data_id`, data length, scale and signed representation must be taken from the meter manufacturer's DL/T645-2007 communication specification. Do not assume that two meter models expose identical data identifiers.
 
