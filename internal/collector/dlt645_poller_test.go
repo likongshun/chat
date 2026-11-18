@@ -35,3 +35,29 @@ func (w *shortWriter) Write(p []byte) (int,error) {
 	w.data = append(w.data, p...)
 	return len(p),nil
 }
+
+func TestGatewayAcquisitionHonorsContextCancellation(t *testing.T) {
+	p := &DL645Poller{}
+	release, err := p.acquireGateway(context.Background(), "gateway:4001")
+	if err != nil { t.Fatal(err) }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.acquireGateway(ctx, "gateway:4001"); err == nil { t.Fatal("expected canceled acquisition") }
+	release()
+	next, err := p.acquireGateway(context.Background(), "gateway:4001")
+	if err != nil { t.Fatal(err) }
+	next()
+}
+
+func TestGatewayAcquisitionSerializesAndReleases(t *testing.T) {
+	p := &DL645Poller{}
+	release, err := p.acquireGateway(context.Background(), "gateway:4001")
+	if err != nil { t.Fatal(err) }
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := p.acquireGateway(ctx, "gateway:4001"); err == nil { t.Fatal("expected serialized acquisition timeout") }
+	release()
+	next, err := p.acquireGateway(context.Background(), "gateway:4001")
+	if err != nil { t.Fatal(err) }
+	next()
+}
