@@ -11,9 +11,10 @@ func TestEncodeReadDataAndDecodeResponse(t *testing.T) {
 	if len(req) != 16 || req[0] != FrameStart || req[7] != FrameStart || req[8] != ReadData || req[len(req)-1] != FrameEnd { t.Fatalf("bad request: %x", req) }
 	// Response payload is data ID + one BCD byte, with 0x33 added on wire.
 	payload := []byte{0x33,0x34,0x33,0x33,0x34}
-	for i := range payload { payload[i] += 0x33 }
+	wirePayload := append([]byte(nil), payload...)
+	for i := range wirePayload { wirePayload[i] += 0x33 }
 	addr, _ := encodeAddress("123456789012")
-	raw := encodeFrame(addr, 0x91, payload)
+	raw := encodeFrame(addr, 0x91, wirePayload)
 	got, err := DecodeResponse(append([]byte{0xfe,0xfe}, raw...), "123456789012")
 	if err != nil { t.Fatal(err) }
 	if got.Control != 0x91 || !bytes.Equal(got.Data, payload) { t.Fatalf("unexpected frame: %+v", got) }
