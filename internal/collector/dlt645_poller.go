@@ -125,7 +125,7 @@ func writeAll(w io.Writer, data []byte) error {
 }
 
 func validateReadResponseControl(control byte) error {
-	if control&0x80 == 0 || control&0x1f != 0x01 {
+	if control&0x80 == 0 || control&0x0f != 0x01 {
 		return fmt.Errorf("unexpected DL/T645 read response control code 0x%02x", control)
 	}
 	if control&0x40 != 0 { return fmt.Errorf("meter returned DL/T645 error response (control 0x%02x)", control) }
@@ -140,7 +140,7 @@ func read645Payload(conn net.Conn, frame dlt645.Frame, address, dataID string, t
 	payload := append([]byte(nil), frame.Data[4:]...)
 	if frame.Control&0x20 == 0 { return payloadWithID(frame.Data), nil }
 	for seq := byte(1); ; seq++ {
-		if seq == 0 { return nil, fmt.Errorf("DL/T645 follow-up frame sequence exhausted") }
+		if seq > 32 { return nil, fmt.Errorf("DL/T645 response exceeds 32 follow-up frames") }
 		request, err := dlt645.EncodeReadFollow(address, dataID, seq)
 		if err != nil { return nil, err }
 		deadline := time.Now().Add(timeout)
@@ -158,6 +158,7 @@ func read645Payload(conn net.Conn, frame dlt645.Frame, address, dataID string, t
 		gotSeq := next.Data[len(next.Data)-1]
 		if gotSeq != seq { return nil, fmt.Errorf("DL/T645 follow-up sequence mismatch: got %d want %d", gotSeq, seq) }
 		payload = append(payload, next.Data[4:len(next.Data)-1]...)
+		if len(payload) > 32 { return nil, fmt.Errorf("DL/T645 assembled payload exceeds 32 bytes") }
 		if next.Control&0x20 == 0 { return append([]byte{frame.Data[0], frame.Data[1], frame.Data[2], frame.Data[3]}, payload...), nil }
 	}
 }
