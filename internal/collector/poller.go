@@ -25,6 +25,8 @@ type ModbusPoller struct {
 	clients map[string]*modbus.Client
 }
 
+func (p *ModbusPoller) Protocol() string { return "modbus-tcp" }
+
 func (p *ModbusPoller) clientFor(d config.Device) *modbus.Client {
 	p.mu.Lock()
 	defer p.mu.Unlock()
