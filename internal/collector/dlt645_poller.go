@@ -76,7 +76,6 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 											value,err=processing.Apply(pt.PointCode,value,p.Config.Processing,p.Config.Enums)
 											if err==nil { s.Value=value }
 										}
-										}
 									}
 								}
 							}
