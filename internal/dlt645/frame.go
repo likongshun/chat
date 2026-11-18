@@ -11,6 +11,7 @@ const (
 	FrameStart byte = 0x68
 	FrameEnd   byte = 0x16
 	ReadData   byte = 0x11
+	ReadFollow byte = 0x12
 )
 
 var (
@@ -37,6 +38,18 @@ func EncodeReadData(address, dataID string) ([]byte, error) {
 	payload := make([]byte, 4)
 	for i := range id { payload[i] = id[3-i] + 0x33 }
 	return encodeFrame(addr, ReadData, payload), nil
+}
+
+
+func EncodeReadFollow(address, dataID string, sequence byte) ([]byte, error) {
+	addr, err := encodeAddress(address)
+	if err != nil { return nil, err }
+	id, err := hex.DecodeString(strings.TrimSpace(dataID))
+	if err != nil || len(id) != 4 { return nil, fmt.Errorf("data identifier must be 8 hexadecimal digits: %w", ErrFrame) }
+	payload := make([]byte, 5)
+	for i := range id { payload[i] = id[3-i] + 0x33 }
+	payload[4] = sequence + 0x33
+	return encodeFrame(addr, ReadFollow, payload), nil
 }
 
 // DecodeResponse validates framing, address, length and checksum, then
