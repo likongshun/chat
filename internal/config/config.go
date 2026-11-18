@@ -4,12 +4,19 @@ import (
 	"fmt"
 	"encoding/hex"
 	"math"
+	"strings"
 	"time"
 )
 
 type Device struct {
 	ID       string
 	Protocol string
+	Transport string
+	SerialPort string
+	BaudRate int
+	DataBits int
+	Parity string
+	StopBits int
 	MeterAddress string
 	DiscoveryOnly bool
 	Name     string
@@ -89,17 +96,29 @@ var allowedOperations = map[string]bool{
 func (c Config) Validate() error {
 	devices := make(map[string]Device, len(c.Devices))
 	for _, d := range c.Devices {
-		if d.ID == "" || d.Host == "" || d.Model == "" {
-			return fmt.Errorf("device %q: id, host and model are required", d.ID)
+		transport := d.Transport
+		if transport == "" { transport = "tcp" }
+		if d.ID == "" || d.Model == "" {
+			return fmt.Errorf("device %q: id and model are required", d.ID)
 		}
 		if _, ok := devices[d.ID]; ok {
 			return fmt.Errorf("duplicate device id %q", d.ID)
 		}
 		if d.Protocol != "" && d.Protocol != "modbus-tcp" && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: unsupported protocol %q", d.ID, d.Protocol) }
+		if transport != "tcp" && transport != "serial" { return fmt.Errorf("device %s: unsupported transport %q", d.ID, transport) }
+		if transport == "tcp" && (d.Host == "" || d.Port == 0) { return fmt.Errorf("device %s: TCP transport requires host and port", d.ID) }
+		if transport == "serial" {
+			if d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: serial transport is only supported for DL/T645", d.ID) }
+			if !strings.HasPrefix(d.SerialPort, "/dev/") || strings.Contains(d.SerialPort, "/../") { return fmt.Errorf("device %s: serial_port must be an absolute /dev path", d.ID) }
+			if d.BaudRate != 0 && (d.BaudRate < 300 || d.BaudRate > 4000000) { return fmt.Errorf("device %s: invalid baud_rate", d.ID) }
+			if d.DataBits != 0 && (d.DataBits < 5 || d.DataBits > 8) { return fmt.Errorf("device %s: data_bits must be 5..8", d.ID) }
+			if d.Parity != "" && d.Parity != "none" && d.Parity != "even" && d.Parity != "odd" { return fmt.Errorf("device %s: parity must be none/even/odd", d.ID) }
+			if d.StopBits != 0 && d.StopBits != 1 && d.StopBits != 2 { return fmt.Errorf("device %s: stop_bits must be 1 or 2", d.ID) }
+		}
 		if d.Protocol == "dl-t645-2007" && !d.DiscoveryOnly && (len(d.MeterAddress) != 12 || !allDigits(d.MeterAddress)) { return fmt.Errorf("device %s: DL/T645 meter_address must be 12 decimal digits unless discovery_only is enabled", d.ID) }
 		if d.DiscoveryOnly && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: discovery_only is only valid for DL/T645", d.ID) }
-		if d.Port == 0 || d.Interval < 100*time.Millisecond {
-			return fmt.Errorf("device %s: port must be set and interval must be >=100ms", d.ID)
+		if d.Interval < 100*time.Millisecond {
+			return fmt.Errorf("device %s: interval must be >=100ms", d.ID)
 		}
 		devices[d.ID] = d
 	}
