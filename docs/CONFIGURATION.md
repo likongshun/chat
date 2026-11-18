@@ -127,3 +127,17 @@ The collector loads the active validated configuration version from PostgreSQL a
 3. Add optional predefined Processing and Enums rows.
 4. Keep all WriteRules disabled.
 5. Run `go test ./...` and validate against the manufacturer's register map before connecting a real device.
+
+## 历史数据查询与分页
+
+控制台历史趋势通过 `GET /api/v1/telemetry` 查询 InfluxDB 中的真实测点记录，必需参数为：
+
+- `device_id`：当前配置中已存在的设备 ID。
+- `point_id`：该设备型号下已启用的测点编码。
+- `from`、`to`：RFC3339 时间戳，范围必须大于 0 且不超过 7 天。
+- `limit`：每页记录数，默认 500，允许 1～1000。
+- `offset`：分页偏移量，默认 0，允许 0～10000。
+
+服务端会先验证设备与测点的配置归属，再构造 Flux 查询；用户输入只作为经过转义的字符串值，不会被拼接为 Flux 表达式。查询使用固定时间窗口聚合和时间排序，分页参数由服务端限制。控制台每页默认 250 条，可翻页并导出当前页 CSV（UTF-8 BOM）。
+
+注意：当前 CSV 导出范围为当前已加载页，不代表整个时间范围的全部记录。需要完整导出时，应逐页查询并合并文件。7 天时间窗、最大 limit、最大 offset 和 InfluxDB 响应体大小限制用于控制查询资源消耗。
