@@ -9,6 +9,7 @@ import (
 type Device struct {
 	ID       string
 	Protocol string
+	MeterAddress string
 	Name     string
 	Host     string
 	Port     uint16
