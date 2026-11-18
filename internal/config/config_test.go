@@ -78,3 +78,19 @@ func TestValidateProcessingParameters(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateDLT645PointUsesByteLength(t *testing.T) {
+	c := Config{
+		Devices: []Device{{ID:"m1", Host:"127.0.0.1", Port:8000, Protocol:"dl-t645-2007", MeterAddress:"123456789012", Model:"DLT", Interval:time.Second, Enabled:true}},
+		Points: []Point{{ID:"DLT/energy", Model:"DLT", PointCode:"energy", DataID:"00010000", Count:3, DataType:"BCD", Scale:0.01, Enabled:true}},
+	}
+	if err := c.Validate(); err != nil { t.Fatal(err) }
+}
+
+func TestRejectDLT645InvalidDataID(t *testing.T) {
+	c := Config{
+		Devices: []Device{{ID:"m1", Host:"127.0.0.1", Port:8000, Protocol:"dl-t645-2007", MeterAddress:"123456789012", Model:"DLT", Interval:time.Second, Enabled:true}},
+		Points: []Point{{ID:"DLT/energy", Model:"DLT", PointCode:"energy", DataID:"bad", Count:3, DataType:"BCD", Enabled:true}},
+	}
+	if err := c.Validate(); err == nil { t.Fatal("expected invalid DL/T645 data id") }
+}
