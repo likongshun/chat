@@ -1,0 +1,127 @@
+package dlt645
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/url"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"go.bug.st/serial"
+)
+
+// SerialTransport opens a local serial device. The endpoint format is
+// serial:///dev/ttyUSB0?baud=9600&data_bits=8&parity=even&stop_bits=1.
+// USB-RS485 adapters with automatic direction control are supported; adapters
+// requiring kernel RS-485 direction GPIO/ioctl need a platform-specific driver.
+type SerialTransport struct{}
+
+func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.Duration) (Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "serial" {
+		return nil, fmt.Errorf("invalid serial endpoint %q", endpoint)
+	}
+	device := filepath.Clean(u.Path)
+	if !filepath.IsAbs(device) || device == "/" || strings.Contains(device, "/../") {
+		return nil, fmt.Errorf("serial device path must be an absolute device path")
+	}
+	q := u.Query()
+	baud, err := queryInt(q.Get("baud"), 9600)
+	if err != nil || baud < 300 || baud > 4_000_000 {
+		return nil, fmt.Errorf("serial baud must be an integer in 300..4000000")
+	}
+	dataBits, err := queryInt(q.Get("data_bits"), 8)
+	if err != nil || dataBits < 5 || dataBits > 8 {
+		return nil, fmt.Errorf("serial data_bits must be 5..8")
+	}
+	stopBits, err := queryInt(q.Get("stop_bits"), 1)
+	if err != nil || (stopBits != 1 && stopBits != 2) {
+		return nil, fmt.Errorf("serial stop_bits must be 1 or 2")
+	}
+	mode := &serial.Mode{BaudRate: baud, DataBits: dataBits, StopBits: serial.OneStopBit}
+	if stopBits == 2 {
+		mode.StopBits = serial.TwoStopBits
+	}
+	switch strings.ToLower(q.Get("parity")) {
+	case "", "none", "n":
+		mode.Parity = serial.NoParity
+	case "even", "e":
+		mode.Parity = serial.EvenParity
+	case "odd", "o":
+		mode.Parity = serial.OddParity
+	default:
+		return nil, fmt.Errorf("serial parity must be none, even or odd")
+	}
+	port, err := serial.Open(device, mode)
+	if err != nil {
+		return nil, fmt.Errorf("open serial device %s: %w", device, err)
+	}
+	if timeout <= 0 {
+		timeout = 1500 * time.Millisecond
+	}
+	if err := port.SetReadTimeout(timeout); err != nil {
+		_ = port.Close()
+		return nil, fmt.Errorf("set serial read timeout: %w", err)
+	}
+	s := &serialSession{port: port}
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = s.Close()
+		case <-s.closed:
+		}
+	}()
+	return s, nil
+}
+
+type serialSession struct {
+	port serial.Port
+	closed chan struct{}
+	closeOnce chan struct{}
+}
+
+func (s *serialSession) Read(p []byte) (int, error)  { return s.port.Read(p) }
+func (s *serialSession) Write(p []byte) (int, error) { return s.port.Write(p) }
+func (s *serialSession) Close() error {
+	if s.closeOnce == nil {
+		s.closeOnce = make(chan struct{})
+	}
+	select {
+	case <-s.closeOnce:
+		return nil
+	default:
+		close(s.closeOnce)
+		close(s.closed)
+		return s.port.Close()
+	}
+}
+func (s *serialSession) LocalAddr() net.Addr                { return serialAddr("local") }
+func (s *serialSession) RemoteAddr() net.Addr               { return serialAddr("serial") }
+func (s *serialSession) SetDeadline(t time.Time) error      { return s.SetReadDeadline(t) }
+func (s *serialSession) SetWriteDeadline(time.Time) error   { return nil }
+func (s *serialSession) SetReadDeadline(t time.Time) error {
+	d := time.Until(t)
+	if t.IsZero() {
+		d = serial.NoTimeout
+	} else if d <= 0 {
+		d = time.Nanosecond
+	}
+	return s.port.SetReadTimeout(d)
+}
+
+type serialAddr string
+func (a serialAddr) Network() string { return "serial" }
+func (a serialAddr) String() string  { return string(a) }
+
+func queryInt(value string, fallback int) (int, error) {
+	if value == "" {
+		return fallback, nil
+	}
+	return strconv.Atoi(value)
+}
