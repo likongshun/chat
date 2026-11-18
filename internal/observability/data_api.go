@@ -45,6 +45,7 @@ type pointView struct {
 	ID string `json:"id"`
 	Code string `json:"code"`
 	Name string `json:"name"`
+	DataID string `json:"data_id,omitempty"`
 	Address uint16 `json:"address"`
 	Function byte `json:"function"`
 	DataType string `json:"data_type"`
