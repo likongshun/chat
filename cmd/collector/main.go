@@ -54,6 +54,7 @@ func main() {
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
 		Latest: latestSamples,
+		DLT645: dlt645Poller,
 		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
