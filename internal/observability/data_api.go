@@ -29,6 +29,12 @@ type deviceView struct {
 	ID string `json:"id"`
 	Name string `json:"name"`
 	Protocol string `json:"protocol"`
+	Transport string `json:"transport"`
+	SerialPort string `json:"serial_port,omitempty"`
+	BaudRate int `json:"baud_rate,omitempty"`
+	DataBits int `json:"data_bits,omitempty"`
+	Parity string `json:"parity,omitempty"`
+	StopBits int `json:"stop_bits,omitempty"`
 	DiscoveryOnly bool `json:"discovery_only"`
 	MeterAddress string `json:"meter_address,omitempty"`
 	Host string `json:"host"`
@@ -143,7 +149,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	for _,d:=range cfg.Devices {
 		var seen *time.Time
 		if last:=s.Latest.LastSuccess(d.ID);!last.IsZero(){seen=&last}
-		items=append(items,deviceView{ID:d.ID,Name:d.Name,Protocol:d.Protocol,DiscoveryOnly:d.DiscoveryOnly,MeterAddress:d.MeterAddress,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
+		items=append(items,deviceView{ID:d.ID,Name:d.Name,Protocol:d.Protocol,Transport:d.Transport,SerialPort:d.SerialPort,BaudRate:d.BaudRate,DataBits:d.DataBits,Parity:d.Parity,StopBits:d.StopBits,DiscoveryOnly:d.DiscoveryOnly,MeterAddress:d.MeterAddress,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
 }
