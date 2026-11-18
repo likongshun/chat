@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/likongshun/chat/internal/dlt645"
+	"github.com/likongshun/chat/internal/config"
 )
 
 func TestDecode645ValueBCDAndScale(t *testing.T) {
