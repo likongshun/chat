@@ -20,7 +20,8 @@ func TestDecode645ValueRejectsBadBCDAndIdentifier(t *testing.T) {
 
 func TestValidateReadResponseControl(t *testing.T) {
 	if err := validateReadResponseControl(0x91); err != nil { t.Fatal(err) }
-	for _, control := range []byte{0x11, 0xB1, 0xD1, 0x92} {
+	if err := validateReadResponseControl(0xB1); err != nil { t.Fatal("continuation response rejected:", err) }
+	for _, control := range []byte{0x11, 0xD1, 0x92} {
 		if err := validateReadResponseControl(control); err == nil { t.Fatalf("control 0x%02x unexpectedly accepted", control) }
 	}
 }
