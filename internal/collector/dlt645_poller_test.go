@@ -38,6 +38,14 @@ func (w *shortWriter) Write(p []byte) (int,error) {
 	return len(p),nil
 }
 
+func TestDecode645ValueLengthAndBCD(t *testing.T) {
+	got, err := decode645Value([]byte{0x00,0x01,0x00,0x00,0x45,0x23,0x01}, "00000100", "BCD", 3, 0.01, 0)
+	if err != nil { t.Fatal(err) }
+	if got != 123.45 { t.Fatalf("got %v, want 123.45", got) }
+	if _, err := decode645Value([]byte{0x00,0x01,0x00,0x00,0x45}, "00000100", "BCD", 3, 1, 0); err == nil { t.Fatal("expected length mismatch") }
+	if _, err := decode645Value([]byte{0x00,0x01,0x00,0x00,0x4a,0x23,0x01}, "00000100", "BCD", 3, 1, 0); err == nil { t.Fatal("expected invalid BCD") }
+}
+
 func TestGatewayAcquisitionHonorsContextCancellation(t *testing.T) {
 	p := &DL645Poller{}
 	release, err := p.acquireGateway(context.Background(), "gateway:4001")
