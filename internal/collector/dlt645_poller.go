@@ -18,9 +18,8 @@ import (
 	"github.com/likongshun/chat/internal/processing"
 )
 
-// DL645Poller communicates with a meter through a transparent TCP-to-RS485
-// gateway. Requests are serialized per gateway because its RS485 bus is
-// half-duplex. A native serial transport can be added without changing Sample.
+// DL645Poller communicates through a TCP-to-RS485 gateway or a local serial
+// adapter. Requests are serialized per physical bus because RS485 is half-duplex.
 type DL645Poller struct {
 	Config config.Config
 	Latest *LatestStore
