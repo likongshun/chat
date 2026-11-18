@@ -61,6 +61,32 @@ func (s *Server) registerDataAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/devices", s.listDevices)
 	mux.HandleFunc("/api/v1/devices/", s.devicePoints)
 	mux.HandleFunc("/api/v1/telemetry", s.queryTelemetry)
+	mux.HandleFunc("/api/v1/dlt645/discover", s.discoverDLT645Meter)
+}
+
+type discoverMeterRequest struct { DeviceID string `json:"device_id"` }
+type discoverMeterResponse struct { DeviceID string `json:"device_id"`; Address string `json:"address"`; Protocol string `json:"protocol"` }
+
+func (s *Server) discoverDLT645Meter(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	if s.DLT645 == nil { http.Error(w, "DL/T645 transport is unavailable", http.StatusServiceUnavailable); return }
+	var request discoverMeterRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil { http.Error(w, "invalid request body", http.StatusBadRequest); return }
+	request.DeviceID = strings.TrimSpace(request.DeviceID)
+	if request.DeviceID == "" { http.Error(w, "device_id is required", http.StatusBadRequest); return }
+	cfg := s.currentConfig()
+	if cfg == nil { http.Error(w, "configuration unavailable", http.StatusServiceUnavailable); return }
+	var device *config.Device
+	for i := range cfg.Devices { if cfg.Devices[i].ID == request.DeviceID { device = &cfg.Devices[i]; break } }
+	if device == nil || device.Protocol != "dl-t645-2007" { http.Error(w, "unknown DL/T645 device", http.StatusNotFound); return }
+	if !device.Enabled { http.Error(w, "device is disabled", http.StatusConflict); return }
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	address, err := s.DLT645.DiscoverMeter(ctx, *device)
+	if err != nil { http.Error(w, "meter discovery failed: "+err.Error(), http.StatusBadGateway); return }
+	writeJSON(w, http.StatusOK, discoverMeterResponse{DeviceID:device.ID, Address:address, Protocol:"dl-t645-2007"})
 }
 
 func (s *Server) currentConfig() *config.Config {
