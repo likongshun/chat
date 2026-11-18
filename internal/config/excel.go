@@ -84,11 +84,12 @@ func readDevices(f *excelize.File) ([]Device, error) {
 		unit, e := parseInt(r, cols, "unit_id", 1); if e != nil { return nil, rowErr("Devices", i, e) }
 		poll, e := parseInt(r, cols, "poll_ms", 1000); if e != nil { return nil, rowErr("Devices", i, e) }
 		enabled, e := parseBool(r, cols, "enabled", true); if e != nil { return nil, rowErr("Devices", i, e) }
+		discoveryOnly, e := parseBool(r, cols, "discovery_only", false); if e != nil { return nil, rowErr("Devices", i, e) }
 		if port < 1 || port > 65535 { return nil, rowErr("Devices", i, fmt.Errorf("port out of range: %d", port)) }
 		if unit < 0 || unit > 255 { return nil, rowErr("Devices", i, fmt.Errorf("unit_id out of range: %d", unit)) }
 		if poll < 100 || poll > int64((1<<63-1)/int64(time.Millisecond)) { return nil, rowErr("Devices", i, fmt.Errorf("poll_ms out of range: %d", poll)) }
 		out = append(out, Device{
-			ID: value(r, cols, "device_id"), Protocol: strings.ToLower(value(r, cols, "protocol")), MeterAddress: value(r, cols, "meter_address"), Name: value(r, cols, "name"),
+			ID: value(r, cols, "device_id"), Protocol: strings.ToLower(value(r, cols, "protocol")), MeterAddress: value(r, cols, "meter_address"), DiscoveryOnly: discoveryOnly, Name: value(r, cols, "name"),
 			Host: value(r, cols, "host"), Port: uint16(port), UnitID: byte(unit),
 			Model: value(r, cols, "model"), Interval: time.Duration(poll)*time.Millisecond, Enabled: enabled,
 		})
