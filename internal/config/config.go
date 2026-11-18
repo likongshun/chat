@@ -91,6 +91,7 @@ func (c Config) Validate() error {
 		if _, ok := devices[d.ID]; ok {
 			return fmt.Errorf("duplicate device id %q", d.ID)
 		}
+		if d.Protocol != "" && d.Protocol != "modbus-tcp" && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: unsupported protocol %q", d.ID, d.Protocol) }
 		if d.Port == 0 || d.Interval < 100*time.Millisecond {
 			return fmt.Errorf("device %s: port must be set and interval must be >=100ms", d.ID)
 		}
