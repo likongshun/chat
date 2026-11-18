@@ -9,7 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
-		"time"
+	"time"
 
 	"github.com/likongshun/chat/internal/config"
 	"github.com/likongshun/chat/internal/dlt645"
@@ -93,7 +93,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 
 func decode645Value(data []byte, expectedID string, scale, offset float64) (float64,error) {
 	if len(data)<5 { return 0,fmt.Errorf("DL/T645 payload too short: %d",len(data)) }
-	id:=strings.ToUpper(hex.EncodeToString([]byte{data[3],data[2],data[1],data[0]}))
+	id:=strings.ToUpper(hex.EncodeToString(data[:4]))
 	if id!=strings.ToUpper(expectedID) { return 0,fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s",id,expectedID) }
 	digits:=make([]byte,0,(len(data)-4)*2)
 	for _,b:=range data[4:] {
