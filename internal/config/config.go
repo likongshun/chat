@@ -75,6 +75,7 @@ var registerWidths = map[string]uint16{
 	"INT16": 1, "UINT16": 1, "BOOL": 1,
 	"INT32": 2, "UINT32": 2, "FLOAT32": 2,
 	"INT64": 4, "UINT64": 4, "FLOAT64": 4,
+	"BCD": 1, "BCD_SIGNED": 1,
 }
 
 var allowedOperations = map[string]bool{
@@ -121,19 +122,35 @@ func (c Config) Validate() error {
 				return fmt.Errorf("point %s references unknown device %s", key, p.DeviceID)
 			}
 		}
+		isDLT645 := false
+		for _, d := range c.Devices {
+			if d.Model == p.Model && d.Protocol == "dl-t645-2007" { isDLT645 = true; break }
+		}
 		if p.Count == 0 {
 			return fmt.Errorf("point %s: count must be positive", key)
 		}
-		if p.Function < 1 || p.Function > 4 {
-			return fmt.Errorf("point %s: read function must be FC01..FC04", key)
+		if isDLT645 {
+			if p.DataID == "" {
+				return fmt.Errorf("point %s: DL/T645 data_id is required", key)
+			}
+			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" {
+				return fmt.Errorf("point %s: DL/T645 type must be BCD or BCD_SIGNED", key)
+			}
+			if p.Count < 1 || p.Count > 32 {
+				return fmt.Errorf("point %s: DL/T645 data length must be 1..32 bytes", key)
+			}
+		} else {
+			if p.Function < 1 || p.Function > 4 {
+				return fmt.Errorf("point %s: read function must be FC01..FC04", key)
+			}
 		}
-		if (p.Function == 1 || p.Function == 2) && p.Count > 2000 {
+		if !isDLT645 && (p.Function == 1 || p.Function == 2) && p.Count > 2000 {
 			return fmt.Errorf("point %s: bit count exceeds protocol limit", key)
 		}
-		if (p.Function == 3 || p.Function == 4) && p.Count > 125 {
+		if !isDLT645 && (p.Function == 3 || p.Function == 4) && p.Count > 125 {
 			return fmt.Errorf("point %s: register count exceeds protocol limit", key)
 		}
-		if uint32(p.Address)+uint32(p.Count) > 65536 {
+		if !isDLT645 && uint32(p.Address)+uint32(p.Count) > 65536 {
 			return fmt.Errorf("point %s: address range exceeds Modbus address space", key)
 		}
 		if p.Writable {
@@ -151,10 +168,10 @@ func (c Config) Validate() error {
 		} else if p.Function >= 3 && p.Count != width {
 			return fmt.Errorf("point %s: %s requires %d registers, got %d", key, p.DataType, width, p.Count)
 		}
-		if p.Function <= 2 && (p.DataType != "BOOL" || p.Count != 1) {
+		if !isDLT645 && p.Function <= 2 && (p.DataType != "BOOL" || p.Count != 1) {
 			return fmt.Errorf("point %s: FC01/FC02 points must map exactly one BOOL bit", key)
 		}
-		if p.Function >= 3 && p.DataType == "BOOL" {
+		if !isDLT645 && p.Function >= 3 && p.DataType == "BOOL" {
 			return fmt.Errorf("point %s: BOOL must use FC01/FC02", key)
 		}
 		if !finite(p.Scale) || !finite(p.Offset) {
