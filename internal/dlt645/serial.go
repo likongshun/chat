@@ -137,7 +137,15 @@ func (s *serialSession) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
-func (s *serialSession) Write(p []byte) (int, error) { return s.port.Write(p) }
+func (s *serialSession) Write(p []byte) (int, error) {
+	n, err := s.port.Write(p)
+	if err == nil && n > 0 {
+		// Drain before switching to receive mode; this prevents a half-duplex
+		// RS485 adapter from truncating the tail of a request still in flight.
+		err = s.port.Drain()
+	}
+	return n, err
+}
 func (s *serialSession) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.closed)
