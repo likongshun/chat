@@ -165,7 +165,7 @@ func (c Config) Validate() error {
 			} else {
 				return fmt.Errorf("point %s: unsupported data type %q", key, p.DataType)
 			}
-		} else if p.Function >= 3 && p.Count != width {
+		} else if !isDLT645 && p.Function >= 3 && p.Count != width {
 			return fmt.Errorf("point %s: %s requires %d registers, got %d", key, p.DataType, width, p.Count)
 		}
 		if !isDLT645 && p.Function <= 2 && (p.DataType != "BOOL" || p.Count != 1) {
