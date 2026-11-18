@@ -201,7 +201,7 @@ func (c Config) Validate() error {
 				break
 			}
 		}
-		if !found {
+		if !found && !d.DiscoveryOnly {
 			return fmt.Errorf("device %s: model %s has no enabled points", d.ID, d.Model)
 		}
 	}
