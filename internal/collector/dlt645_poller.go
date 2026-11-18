@@ -132,6 +132,9 @@ func validateReadResponseControl(control byte) error {
 	if control&0x40 != 0 {
 		return fmt.Errorf("meter returned DL/T645 error response (control 0x%02x)", control)
 	}
+	if control&0x20 != 0 {
+		return fmt.Errorf("DL/T645 multi-frame response is not supported yet (control 0x%02x)", control)
+	}
 	return nil
 }
 
