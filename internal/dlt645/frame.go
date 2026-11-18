@@ -12,6 +12,7 @@ const (
 	FrameEnd   byte = 0x16
 	ReadData   byte = 0x11
 	ReadFollow byte = 0x12
+	ReadAddress byte = 0x13
 )
 
 var (
@@ -52,9 +53,33 @@ func EncodeReadFollow(address, dataID string, sequence byte) ([]byte, error) {
 	return encodeFrame(addr, ReadFollow, payload), nil
 }
 
+func EncodeReadAddress() []byte {
+	var addr [6]byte
+	for i := range addr { addr[i] = 0xAA }
+	return encodeFrame(addr, ReadAddress, nil)
+}
+
+func DecodeReadAddressResponse(raw []byte) (string, error) {
+	frame, err := decodeRawFrame(raw)
+	if err != nil { return "", err }
+	if frame.Control != 0x93 { return "", fmt.Errorf("unexpected DL/T645 read-address control code 0x%02x", frame.Control) }
+	if len(frame.Data) != 6 { return "", fmt.Errorf("DL/T645 read-address response length %d, want 6: %w", len(frame.Data), ErrFrame) }
+	return decodeAddress(frame.Data)
+}
+
 // DecodeResponse validates framing, address, length and checksum, then
 // removes the DL/T645 data-byte 0x33 offset.
 func DecodeResponse(raw []byte, expectedAddress string) (Frame, error) {
+	frame, err := decodeRawFrame(raw)
+	if err != nil { return Frame{}, err }
+	if expectedAddress != "" && frame.Address != expectedAddress {
+		return Frame{}, fmt.Errorf("response address %s does not match %s", frame.Address, expectedAddress)
+	}
+	for i := range frame.Data { frame.Data[i] -= 0x33 }
+	return frame, nil
+}
+
+func decodeRawFrame(raw []byte) (Frame, error) {
 	start := -1
 	for i, b := range raw { if b == FrameStart { start = i; break } }
 	if start < 0 || len(raw)-start < 12 { return Frame{}, ErrFrame }
@@ -67,10 +92,7 @@ func DecodeResponse(raw []byte, expectedAddress string) (Frame, error) {
 	if sum != raw[len(raw)-2] { return Frame{}, ErrChecksum }
 	addr, err := decodeAddress(raw[1:7])
 	if err != nil { return Frame{}, err }
-	if expectedAddress != "" && addr != expectedAddress { return Frame{}, fmt.Errorf("response address %s does not match %s", addr, expectedAddress) }
-	data := append([]byte(nil), raw[10:10+n]...)
-	for i := range data { data[i] -= 0x33 }
-	return Frame{Address:addr, Control:raw[8], Data:data}, nil
+	return Frame{Address:addr, Control:raw[8], Data:append([]byte(nil), raw[10:10+n]...)}, nil
 }
 
 func encodeFrame(addr [6]byte, control byte, data []byte) []byte {
