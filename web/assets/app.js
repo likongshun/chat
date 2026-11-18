@@ -39,7 +39,7 @@ function renderDevices(){
   if(d.id===selectedDevice)tr.style.background='#f2f7ff';
   const name=cell(tr);
   const b=document.createElement('button');b.className='table-action';b.textContent=(d.name||d.id)+' · '+d.id;b.addEventListener('click',()=>selectDevice(d.id));name.appendChild(b);
-  cell(tr,d.protocol==='dl-t645-2007'?'DL/T645-2007':'Modbus TCP');cell(tr,d.model);cell(tr,d.host+':'+d.port);cell(tr,fmt(d.point_count));
+  cell(tr,d.protocol==='dl-t645-2007'?'DL/T645-2007':'Modbus TCP');cell(tr,d.model);cell(tr,d.protocol==='dl-t645-2007'?(d.meter_address||'待发现')+' · '+d.host+':'+d.port:d.host+':'+d.port);cell(tr,fmt(d.point_count));
   const fresh=d.last_seen&&Date.now()-new Date(d.last_seen).getTime()<Math.max(10000,(d.interval_ms||1000)*3);
   cell(tr,d.discovery_only?'待搜索':d.enabled?(fresh?'在线':'等待数据'):'已禁用','td',d.discovery_only?'':d.enabled?(fresh?'state-good':''):'state-bad');
   body.appendChild(tr);
