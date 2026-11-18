@@ -114,7 +114,7 @@ func readPoints(f *excelize.File) ([]Point, error) {
 		if rw != "R" && rw != "RW" { return nil, rowErr("Points", i, fmt.Errorf("rw must be R or RW")) }
 		if fn < 1 || fn > 4 { return nil, rowErr("Points", i, fmt.Errorf("function must be 1..4")) }
 		if addr < 0 || addr > 65535 { return nil, rowErr("Points", i, fmt.Errorf("address out of range: %d", addr)) }
-		if length < 0 || length > 2000 { return nil, rowErr("Points", i, fmt.Errorf("length out of range: %d", length)) }
+		if length < 0 || length > 4096 { return nil, rowErr("Points", i, fmt.Errorf("length out of range: %d", length)) }
 		dtype := strings.ToUpper(value(r, cols, "type"))
 		count := length
 		if count == 0 { count = int64(registerWidths[dtype]) }
