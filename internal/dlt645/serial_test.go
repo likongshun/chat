@@ -2,6 +2,11 @@ package dlt645
 
 import (
 	"testing"
+	"context"
+	"errors"
+	"io"
+	"sync"
+	"time"
 
 	"go.bug.st/serial"
 )
@@ -46,5 +51,47 @@ func TestParseSerialEndpointRejectsUnsafeOrInvalidValues(t *testing.T) {
 				t.Fatalf("expected endpoint rejection: %s", endpoint)
 			}
 		})
+	}
+}
+
+type blockingSerialPort struct {
+	closed chan struct{}
+	once sync.Once
+}
+
+func newBlockingSerialPort() *blockingSerialPort {
+	return &blockingSerialPort{closed: make(chan struct{})}
+}
+func (p *blockingSerialPort) SetMode(*serial.Mode) error { return nil }
+func (p *blockingSerialPort) Read([]byte) (int, error) { <-p.closed; return 0, io.ErrClosedPipe }
+func (p *blockingSerialPort) Write([]byte) (int, error) { <-p.closed; return 0, io.ErrClosedPipe }
+func (p *blockingSerialPort) Drain() error { return nil }
+func (p *blockingSerialPort) ResetInputBuffer() error { return nil }
+func (p *blockingSerialPort) ResetOutputBuffer() error { return nil }
+func (p *blockingSerialPort) SetDTR(bool) error { return nil }
+func (p *blockingSerialPort) SetRTS(bool) error { return nil }
+func (p *blockingSerialPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return &serial.ModemStatusBits{}, nil
+}
+func (p *blockingSerialPort) SetReadTimeout(time.Duration) error { return nil }
+func (p *blockingSerialPort) Close() error {
+	p.once.Do(func() { close(p.closed) })
+	return nil
+}
+func (p *blockingSerialPort) Break(time.Duration) error { return nil }
+
+func TestSerialSessionWriteDeadlineClosesBlockedPort(t *testing.T) {
+	port := newBlockingSerialPort()
+	session := &serialSession{port: port, closed: make(chan struct{})}
+	if err := session.SetWriteDeadline(time.Now().Add(30 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_, err := session.Write([]byte{0x68})
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write error = %v, want deadline exceeded", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("write deadline was not enforced")
 	}
 }
