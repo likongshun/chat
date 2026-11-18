@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
