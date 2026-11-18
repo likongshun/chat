@@ -1,7 +1,9 @@
 package collector
 
 import (
+	"context"
 	"math"
+	"time"
 	"testing"
 )
 
