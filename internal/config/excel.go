@@ -119,9 +119,11 @@ func readPoints(f *excelize.File) ([]Point, error) {
 		count := length
 		if count == 0 { count = int64(registerWidths[dtype]) }
 		if dtype == "STRING" && count == 0 { count = length }
-		if count < 1 || count > 2000 { return nil, rowErr("Points", i, fmt.Errorf("invalid length/count: %d", count)) }
-		if fn >= 3 && count > 125 { return nil, rowErr("Points", i, fmt.Errorf("register read length exceeds 125")) }
-		if uint64(addr)+uint64(count) > 65536 { return nil, rowErr("Points", i, fmt.Errorf("address range exceeds 65535")) }
+		isDLT645 := false
+		for _, device := range c.Devices { if device.Model == model && device.Protocol == "dl-t645-2007" { isDLT645 = true; break } }
+		if count < 1 || count > 4096 { return nil, rowErr("Points", i, fmt.Errorf("invalid length/count: %d", count)) }
+		if !isDLT645 && fn >= 3 && count > 125 { return nil, rowErr("Points", i, fmt.Errorf("register read length exceeds 125")) }
+		if !isDLT645 && uint64(addr)+uint64(count) > 65536 { return nil, rowErr("Points", i, fmt.Errorf("address range exceeds 65535")) }
 		out = append(out, Point{
 			ID: model + "/" + code, Model: model, PointCode: code, DataID: strings.ToUpper(value(r, cols, "data_id")), Name: value(r, cols, "name"),
 			Address: uint16(addr), Count: uint16(count), Function: byte(fn), DataType: dtype,
