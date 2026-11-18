@@ -36,6 +36,7 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+          RS485_DEVICE=/dev/ttyUSB0 RS485_CONTAINER_DEVICE=/dev/ttyUSB0 RS485_GID=20 docker compose -f compose.yaml -f compose.serial.yaml config --quiet
       - name: Build collector container image
         run: docker build --tag modbus-collector:ci .
       - name: Build dashboard container image
