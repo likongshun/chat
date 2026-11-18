@@ -70,10 +70,12 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 								frame,err=dlt645.DecodeResponse(raw,address)
 								if err==nil {
 									if frame.Control&0x40!=0 { err=fmt.Errorf("meter returned DL/T645 error response") } else {
-										value,decodeErr:=decode645Value(frame.Data,pt.DataID,pt.Scale,pt.Offset)
+										decoded,decodeErr:=decode645Value(frame.Data,pt.DataID,pt.Scale,pt.Offset)
 										if decodeErr!=nil { err=decodeErr } else {
+											var value any = decoded
 											value,err=processing.Apply(pt.PointCode,value,p.Config.Processing,p.Config.Enums)
 											if err==nil { s.Value=value }
+										}
 										}
 									}
 								}
