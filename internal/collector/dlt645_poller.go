@@ -47,6 +47,31 @@ func (p *DL645Poller) acquireGateway(ctx context.Context, gateway string) (func(
 	}
 }
 
+// DiscoverMeter reads the meter address using the standard 13H command.
+// DL/T645 specifies this as point-to-point; isolate one meter on the bus before
+// invoking it to avoid simultaneous replies from multiple meters.
+func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (string, error) {
+	if d.Protocol != "dl-t645-2007" { return "", fmt.Errorf("device %s is not configured for DL/T645-2007", d.ID) }
+	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
+	release, err := p.acquireGateway(ctx, gateway)
+	if err != nil { return "", err }
+	defer release()
+	timeout := p.Timeout
+	if timeout <= 0 { timeout = 1500 * time.Millisecond }
+	transport := p.Transport
+	if transport == nil { transport = dlt645.TCPTransport{} }
+	conn, err := transport.Open(ctx, gateway, timeout)
+	if err != nil { return "", err }
+	defer conn.Close()
+	deadline := time.Now().Add(timeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
+	if err := conn.SetDeadline(deadline); err != nil { return "", err }
+	if err := writeAll(conn, dlt645.EncodeReadAddress()); err != nil { return "", err }
+	raw, err := read645RawFrame(conn)
+	if err != nil { return "", err }
+	return dlt645.DecodeReadAddressResponse(raw)
+}
+
 func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, error) {
 	if !d.Enabled { return nil, nil }
 	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
@@ -204,21 +229,26 @@ func decode645Value(data []byte, expectedID, dataType string, count uint16, scal
 
 
 func read645Frame(r io.Reader, expectedAddress string) (dlt645.Frame, error) {
-	// Optical/RS485 adapters may prepend 0xFE wake-up bytes.
+	raw, err := read645RawFrame(r)
+	if err != nil { return dlt645.Frame{}, err }
+	return dlt645.DecodeResponse(raw, expectedAddress)
+}
+
+func read645RawFrame(r io.Reader) ([]byte, error) {
 	var start [1]byte
 	for i := 0; i < 16; i++ {
-		if _, err := io.ReadFull(r, start[:]); err != nil { return dlt645.Frame{}, err }
+		if _, err := io.ReadFull(r, start[:]); err != nil { return nil, err }
 		if start[0] == dlt645.FrameStart { break }
-		if i == 15 { return dlt645.Frame{}, dlt645.ErrFrame }
+		if i == 15 { return nil, dlt645.ErrFrame }
 	}
 	header := make([]byte, 9)
-	if _, err := io.ReadFull(r, header); err != nil { return dlt645.Frame{}, err }
-	if header[6] != dlt645.FrameStart { return dlt645.Frame{}, dlt645.ErrFrame }
+	if _, err := io.ReadFull(r, header); err != nil { return nil, err }
+	if header[6] != dlt645.FrameStart { return nil, dlt645.ErrFrame }
 	n := int(header[8])
-	if n > 200 { return dlt645.Frame{}, fmt.Errorf("DL/T645 response length %d exceeds limit", n) }
+	if n > 200 { return nil, fmt.Errorf("DL/T645 response length %d exceeds limit", n) }
 	raw := make([]byte, 10+n+2)
 	raw[0] = dlt645.FrameStart
 	copy(raw[1:10], header)
-	if _, err := io.ReadFull(r, raw[10:]); err != nil { return dlt645.Frame{}, err }
-	return dlt645.DecodeResponse(raw, expectedAddress)
+	if _, err := io.ReadFull(r, raw[10:]); err != nil { return nil, err }
+	return raw, nil
 }
