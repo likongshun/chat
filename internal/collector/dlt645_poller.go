@@ -42,7 +42,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 	for _,pt:=range points {
 		if err:=ctx.Err(); err!=nil { return samples,err }
 		now:=time.Now().UTC()
-		s:=Sample{DeviceID:d.ID,Model:d.Model,PointCode:pt.PointCode,Unit:pt.Unit,ConfigVersion:p.ConfigVersion,Timestamp:now,Quality:QualityGood}
+		s:=Sample{DeviceID:d.ID,Protocol:"dl-t645-2007",Model:d.Model,PointCode:pt.PointCode,Unit:pt.Unit,ConfigVersion:p.ConfigVersion,Timestamp:now,Quality:QualityGood}
 		s.EventID=fmt.Sprintf("%s/%s/%d",d.ID,pt.PointCode,now.UnixNano())
 		if len(pt.DataID)!=8 {
 			s.Quality=QualityBad; s.Error=fmt.Sprintf("point %s: data_id must be 8 hex digits",pt.PointCode); samples=append(samples,s); failures=append(failures,fmt.Errorf("%s: %s",pt.PointCode,s.Error)); continue
