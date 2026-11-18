@@ -32,6 +32,7 @@ type InfluxSink struct {
 
 type samplePayload struct {
 	DeviceID  string    `json:"device_id"`
+	Protocol  string    `json:"protocol"`
 	Model     string    `json:"model"`
 	PointCode string    `json:"point_code"`
 	Unit      string    `json:"unit"`
@@ -116,6 +117,7 @@ func influxLine(event Event) (string, error) {
 		return "", fmt.Errorf("event %d is missing device_id, point_code or timestamp", event.Seq)
 	}
 	tags := []string{"device_id=" + escapeTag(sample.DeviceID)}
+	if sample.Protocol != "" { tags = append(tags, "protocol=" + escapeTag(sample.Protocol)) }
 	if sample.Model != "" {
 		tags = append(tags, "model="+escapeTag(sample.Model))
 	}
