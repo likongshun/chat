@@ -158,7 +158,7 @@ func read645Payload(conn net.Conn, frame dlt645.Frame, address, dataID string, t
 		gotSeq := next.Data[len(next.Data)-1]
 		if gotSeq != seq { return nil, fmt.Errorf("DL/T645 follow-up sequence mismatch: got %d want %d", gotSeq, seq) }
 		payload = append(payload, next.Data[4:len(next.Data)-1]...)
-		if len(payload) > 32 { return nil, fmt.Errorf("DL/T645 assembled payload exceeds 32 bytes") }
+		if len(payload) > 4096 { return nil, fmt.Errorf("DL/T645 assembled payload exceeds 32 bytes") }
 		if next.Control&0x20 == 0 { return append([]byte{frame.Data[0], frame.Data[1], frame.Data[2], frame.Data[3]}, payload...), nil }
 	}
 }
@@ -174,7 +174,7 @@ func decode645Value(data []byte, expectedID, dataType string, count uint16, scal
 	if len(data) < 5 { return 0, fmt.Errorf("DL/T645 payload too short: %d", len(data)) }
 	id := strings.ToUpper(hex.EncodeToString([]byte{data[3], data[2], data[1], data[0]}))
 	if id != strings.ToUpper(strings.TrimSpace(expectedID)) { return 0, fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s", id, expectedID) }
-	if count == 0 || count > 32 { return 0, fmt.Errorf("invalid DL/T645 data length %d", count) }
+	if count == 0 || count > 4096 { return 0, fmt.Errorf("invalid DL/T645 data length %d", count) }
 	payload := data[4:]
 	if len(payload) != int(count) { return 0, fmt.Errorf("DL/T645 data length mismatch: got %d want %d", len(payload), count) }
 	if dataType != "BCD" && dataType != "BCD_SIGNED" { return 0, fmt.Errorf("unsupported DL/T645 data type %q", dataType) }
