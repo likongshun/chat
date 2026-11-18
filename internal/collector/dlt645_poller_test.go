@@ -143,3 +143,28 @@ func TestDecode645SignedBCD(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if math.Abs(got-(-2.34)) > 1e-9 { t.Fatalf("got %v, want -2.34", got) }
 }
+
+func TestRead645PayloadRejectsAssembledLengthOverflow(t *testing.T) {
+	address, dataID := "123456789012", "00010000"
+	first, err := dlt645.DecodeResponse(test645RawFrame(address, 0xB1, add645Offset([]byte{0,0,1,0,0x12})), address)
+	if err != nil { t.Fatal(err) }
+	client, peer := net.Pipe()
+	defer client.Close()
+	defer peer.Close()
+	serverErr := make(chan error,1)
+	go func() {
+		for seq:=byte(1);seq<=22;seq++ {
+			request:=make([]byte,17)
+			if _,err:=io.ReadFull(peer,request);err!=nil{serverErr<-err;return}
+			data:=make([]byte,200)
+			copy(data,[]byte{0,0,1,0})
+			data[199]=seq
+			control:=byte(0xB2)
+			if err:=writeAll(peer,test645RawFrame(address,control,add645Offset(data)));err!=nil{serverErr<-err;return}
+		}
+		serverErr<-nil
+	}()
+	_, err = read645Payload(client,first,address,dataID,time.Second,context.Background())
+	if err==nil || !strings.Contains(err.Error(),"exceeds 4096 bytes"){t.Fatalf("expected assembled length rejection, got %v",err)}
+	if serverErr:=<-serverErr;serverErr!=nil{t.Fatal(serverErr)}
+}
