@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +29,28 @@ type DL645Poller struct {
 	Transport dlt645.Transport
 	mu sync.Mutex
 	gateways map[string]chan struct{}
+}
+
+
+func dlt645Endpoint(d config.Device) string {
+	if d.Transport != "serial" {
+		return net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
+	}
+	q := url.Values{}
+	baud := d.BaudRate
+	if baud == 0 { baud = 9600 }
+	dataBits := d.DataBits
+	if dataBits == 0 { dataBits = 8 }
+	parity := d.Parity
+	if parity == "" { parity = "even" }
+	stopBits := d.StopBits
+	if stopBits == 0 { stopBits = 1 }
+	q.Set("baud", strconv.Itoa(baud))
+	q.Set("data_bits", strconv.Itoa(dataBits))
+	q.Set("parity", parity)
+	q.Set("stop_bits", strconv.Itoa(stopBits))
+	u := url.URL{Scheme: "serial", Path: d.SerialPort, RawQuery: q.Encode()}
+	return u.String()
 }
 
 func (p *DL645Poller) Protocol() string { return "dl-t645-2007" }
@@ -52,14 +75,14 @@ func (p *DL645Poller) acquireGateway(ctx context.Context, gateway string) (func(
 // invoking it to avoid simultaneous replies from multiple meters.
 func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (string, error) {
 	if d.Protocol != "dl-t645-2007" { return "", fmt.Errorf("device %s is not configured for DL/T645-2007", d.ID) }
-	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
+	gateway := dlt645Endpoint(d)
 	release, err := p.acquireGateway(ctx, gateway)
 	if err != nil { return "", err }
 	defer release()
 	timeout := p.Timeout
 	if timeout <= 0 { timeout = 1500 * time.Millisecond }
 	transport := p.Transport
-	if transport == nil { transport = dlt645.TCPTransport{} }
+	if transport == nil { transport = dlt645.DefaultTransport{} }
 	conn, err := transport.Open(ctx, gateway, timeout)
 	if err != nil { return "", err }
 	defer conn.Close()
