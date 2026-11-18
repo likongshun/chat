@@ -332,7 +332,7 @@ Dockerfile 在构建镜像时将该文件复制进镜像。修改工作簿后，
 
 | Sheet | 用途 | 主要字段 |
 |---|---|---|
-| Devices | 设备实例 | `device_id`、`protocol`、`meter_address`、`discovery_only`、`name`、`host`、`port`、`unit_id`、`model`、`poll_ms`、`enabled` |
+| Devices | 设备实例 | `device_id`、`protocol`、`transport`、`serial_port`、`baud_rate`、`data_bits`、`parity`、`stop_bits`、`meter_address`、`discovery_only`、`name`、`host`、`port`、`unit_id`、`model`、`poll_ms`、`enabled` |
 | Points | 点位和寄存器定义 | `model`、`point_code`、`function`、`address`、`type`、`length/count`、`scale`、`offset`、`byte_order`、`word_order`、`unit`、`read_group`、`rw`、`enabled` |
 | Processing | 解码后的处理规则 | `point_code`、`operation`、`param1`、`param2` |
 | WriteRules | 写权限规则定义 | `model`、`point_code`、`enabled`、`min`、`max`、`require_confirm` |
@@ -354,6 +354,8 @@ Sheet 名称和必需列标题应保持稳定。列名按表头匹配，不要�
 - `protocol`：可选协议标识，空值默认 `modbus-tcp`；DL/T645 填 `dl-t645-2007`。
 - `meter_address`：DL/T645 电表 12 位十进制地址。
 - `discovery_only`：可选，TRUE 时只允许人工地址搜索、不执行周期采集，可暂时留空 `meter_address`。
+- `transport`：DL/T645 传输方式，`tcp`（默认）或 `serial`；Modbus TCP 仍使用 TCP。
+- `serial_port`、`baud_rate`、`data_bits`、`parity`、`stop_bits`：仅 `transport=serial` 时使用，配置容器内串口路径和串口参数。
 
 设备 IP 必须是 collector 容器网络可达的地址。通过网关连接多个从站时，Unit ID 应按网关说明填写。
 
