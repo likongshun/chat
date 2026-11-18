@@ -136,8 +136,8 @@ func (c Config) Validate() error {
 			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" {
 				return fmt.Errorf("point %s: DL/T645 type must be BCD or BCD_SIGNED", key)
 			}
-			if p.Count < 1 || p.Count > 32 {
-				return fmt.Errorf("point %s: DL/T645 data length must be 1..32 bytes", key)
+			if p.Count < 1 || p.Count > 4096 {
+				return fmt.Errorf("point %s: DL/T645 data length must be 1..4096 bytes", key)
 			}
 		} else {
 			if p.Function < 1 || p.Function > 4 {
