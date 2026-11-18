@@ -190,7 +190,7 @@ func runCollection(
 		}
 
 		pollCtx, cancelPoll := context.WithCancel(ctx)
-		results := engine.Run(pollCtx, cfg.Devices)
+		results := engine.Run(pollCtx, collectionDevices(cfg.Devices))
 		writerCtx, cancelWriter := context.WithCancel(context.Background())
 		persistDone := make(chan error, 1)
 		go func() { persistDone <- pipeline.PersistResults(writerCtx, results, store) }()
@@ -267,9 +267,17 @@ func runCollection(
 	}
 }
 
+func collectionDevices(devices []config.Device) []config.Device {
+	active := make([]config.Device, 0, len(devices))
+	for _, device := range devices {
+		if device.Enabled && !device.DiscoveryOnly { active = append(active, device) }
+	}
+	return active
+}
+
 func hasEnabledDevices(devices []config.Device) bool {
 	for _, device := range devices {
-		if device.Enabled {
+		if device.Enabled && !device.DiscoveryOnly {
 			return true
 		}
 	}
