@@ -98,3 +98,36 @@ func TestSerialTransportPTYContextCancellationClosesSession(t *testing.T) {
 		t.Fatal("context cancellation did not unblock serial read")
 	}
 }
+
+func TestSerialTransportPTYCanReopenAfterSessionClose(t *testing.T) {
+	master, slave, err := pty.Open()
+	if err != nil {
+		t.Skipf("PTY is unavailable: %v", err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	endpoint := fmt.Sprintf("serial://%s?baud=9600&data_bits=8&parity=none&stop_bits=1", slave.Name())
+	first, err := (SerialTransport{}).Open(context.Background(), endpoint, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := (SerialTransport{}).Open(context.Background(), endpoint, time.Second)
+	if err != nil {
+		t.Fatalf("reopen serial port after session close: %v", err)
+	}
+	defer second.Close()
+	payload := []byte{0x68, 0x11, 0x16}
+	if _, err := second.Write(payload); err != nil {
+		t.Fatalf("write after reopen: %v", err)
+	}
+	got := make([]byte, len(payload))
+	if _, err := io.ReadFull(master, got); err != nil {
+		t.Fatalf("read after reopen: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("reopened session wrote % X, want % X", got, payload)
+	}
+}
