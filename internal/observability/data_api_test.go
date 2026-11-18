@@ -34,7 +34,7 @@ func TestDeviceAndLatestPointAPIs(t *testing.T) {
 	devices:=httptest.NewRecorder();h.ServeHTTP(devices,httptest.NewRequest(http.MethodGet,"/api/v1/devices",nil))
 	if devices.Code!=http.StatusOK||!strings.Contains(devices.Body.String(),"\"id\":\"meter-1\"")||!strings.Contains(devices.Body.String(),"\"point_count\":1"){t.Fatalf("devices response %d: %s",devices.Code,devices.Body.String())}
 	points:=httptest.NewRecorder();h.ServeHTTP(points,httptest.NewRequest(http.MethodGet,"/api/v1/devices/meter-1/points",nil))
-	if points.Code!=http.StatusOK||!strings.Contains(points.Body.String(),"\"value\":123.5"){t.Fatalf("points response %d: %s",points.Code,points.Body.String())}
+	if points.Code!=http.StatusOK||!strings.Contains(points.Body.String(),"\"value\":123.5")||!strings.Contains(points.Body.String(),"\"data_id\":\"00010000\""){t.Fatalf("points response %d: %s",points.Code,points.Body.String())}
 	missing:=httptest.NewRecorder();h.ServeHTTP(missing,httptest.NewRequest(http.MethodGet,"/api/v1/devices/missing/points",nil))
 	if missing.Code!=http.StatusNotFound{t.Fatalf("missing device status=%d",missing.Code)}
 }
