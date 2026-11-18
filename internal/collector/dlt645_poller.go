@@ -53,6 +53,13 @@ func dlt645Endpoint(d config.Device) string {
 	return u.String()
 }
 
+func dlt645BusKey(d config.Device) string {
+	if d.Transport == "serial" {
+		return "serial:" + d.SerialPort
+	}
+	return "tcp:" + net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
+}
+
 func (p *DL645Poller) Protocol() string { return "dl-t645-2007" }
 func (p *DL645Poller) Close() error { return nil }
 
@@ -75,15 +82,15 @@ func (p *DL645Poller) acquireGateway(ctx context.Context, gateway string) (func(
 // invoking it to avoid simultaneous replies from multiple meters.
 func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (string, error) {
 	if d.Protocol != "dl-t645-2007" { return "", fmt.Errorf("device %s is not configured for DL/T645-2007", d.ID) }
-	gateway := dlt645Endpoint(d)
-	release, err := p.acquireGateway(ctx, gateway)
+	endpoint := dlt645Endpoint(d)
+	release, err := p.acquireGateway(ctx, dlt645BusKey(d))
 	if err != nil { return "", err }
 	defer release()
 	timeout := p.Timeout
 	if timeout <= 0 { timeout = 1500 * time.Millisecond }
 	transport := p.Transport
 	if transport == nil { transport = dlt645.DefaultTransport{} }
-	conn, err := transport.Open(ctx, gateway, timeout)
+	conn, err := transport.Open(ctx, endpoint, timeout)
 	if err != nil { return "", err }
 	defer conn.Close()
 	stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -99,8 +106,8 @@ func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (strin
 
 func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, error) {
 	if !d.Enabled || d.DiscoveryOnly { return nil, nil }
-	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
-	release, err := p.acquireGateway(ctx, gateway)
+	endpoint := dlt645Endpoint(d)
+	release, err := p.acquireGateway(ctx, dlt645BusKey(d))
 	if err != nil { return nil, err }
 	defer release()
 
@@ -123,7 +130,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 		request, err := dlt645.EncodeReadData(address, pt.DataID)
 		if err == nil {
 			transport := p.Transport
-			if transport == nil { transport = dlt645.TCPTransport{} }
+			if transport == nil { transport = dlt645.DefaultTransport{} }
 			conn, dialErr := transport.Open(ctx, gateway, timeout)
 			err = dialErr
 			if err == nil {
