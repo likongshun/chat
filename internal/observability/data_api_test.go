@@ -2,6 +2,7 @@ package observability
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/dlt645"
 )
 
 func testDataServer(t *testing.T) (*Server,*collector.LatestStore) {
@@ -63,4 +65,48 @@ func TestInfluxHistoryAPIAndQueryValidation(t *testing.T) {
 func TestParseInfluxValuePreservesIntegerPrecision(t *testing.T) {
 	if got:=parseInfluxValue("9007199254740993","long");got!=int64(9007199254740993){t.Fatalf("int64 precision lost: %T %v",got,got)}
 	if got:=parseInfluxValue("18446744073709551615","unsignedLong");got!=uint64(^uint64(0)){t.Fatalf("uint64 precision lost: %T %v",got,got)}
+}
+
+type discoveryTestTransport struct { address string }
+func (t discoveryTestTransport) Open(ctx context.Context, endpoint string, timeout time.Duration) (dlt645.Session, error) {
+	client, peer := net.Pipe()
+	go func() {
+		defer peer.Close()
+		request := make([]byte, 12)
+		if _, err := io.ReadFull(peer, request); err != nil { return }
+		if request[8] != dlt645.ReadAddress { return }
+		addr := make([]byte, 6)
+		for i:=0;i<6;i++ { addr[i]=(t.address[10-2*i]-'0')<<4 | (t.address[11-2*i]-'0') }
+		response := []byte{0x68}
+		response = append(response, addr...)
+		response = append(response, 0x68, 0x93, 0x06)
+		response = append(response, addr...)
+		var sum byte
+		for _, b := range response { sum += b }
+		response = append(response, sum, 0x16)
+		_, _ = peer.Write(response)
+	}()
+	return client, nil
+}
+
+func TestDLT645MeterDiscoveryAPI(t *testing.T) {
+	cfg := config.Config{
+		Devices: []config.Device{{ID:"find-meter",Host:"127.0.0.1",Port:4001,Protocol:"dl-t645-2007",DiscoveryOnly:true,Model:"DLT",Interval:time.Second,Enabled:true}},
+		Points: []config.Point{{ID:"DLT/energy",Model:"DLT",PointCode:"energy",DataID:"00010000",Count:4,DataType:"BCD",Scale:0.01,Enabled:true}},
+	}
+	manager, err := config.NewManager(cfg); if err != nil { t.Fatal(err) }
+	poller := &collector.DL645Poller{Timeout:time.Second,Transport:discoveryTestTransport{address:"123456789012"}}
+	server := &Server{Config:manager,DLT645:poller}
+	body := strings.NewReader(`{"device_id":"find-meter"}`)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodPost,"/api/v1/dlt645/discover",body))
+	if response.Code!=http.StatusOK || !strings.Contains(response.Body.String(),`"address":"123456789012"`) { t.Fatalf("discovery response %d: %s",response.Code,response.Body.String()) }
+}
+
+func TestDLT645MeterDiscoveryRejectsUnknownDevice(t *testing.T) {
+	server,_ := testDataServer(t)
+	server.DLT645 = &collector.DL645Poller{}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodPost,"/api/v1/dlt645/discover",strings.NewReader(`{"device_id":"missing"}`)))
+	if response.Code!=http.StatusNotFound { t.Fatalf("status=%d body=%s",response.Code,response.Body.String()) }
 }
