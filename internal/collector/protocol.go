@@ -48,5 +48,5 @@ func (r *ProtocolRouter) Close() error {
 		seen[engine] = true
 		if err := engine.Close(); err != nil { errs = append(errs, err) }
 	}
-	return errors.Join(errs)
+	return errors.Join(errs...)
 }
