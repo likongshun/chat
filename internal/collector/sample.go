@@ -13,6 +13,7 @@ const (
 type Sample struct {
 	EventID   string    `json:"event_id"`
 	DeviceID  string    `json:"device_id"`
+	Protocol  string    `json:"protocol,omitempty"`
 	Model     string    `json:"model"`
 	PointCode string    `json:"point_code"`
 	Unit      string    `json:"unit,omitempty"`
