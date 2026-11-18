@@ -27,6 +27,9 @@ type InfluxQueryOptions struct {
 type deviceView struct {
 	ID string `json:"id"`
 	Name string `json:"name"`
+	Protocol string `json:"protocol"`
+	DiscoveryOnly bool `json:"discovery_only"`
+	MeterAddress string `json:"meter_address,omitempty"`
 	Host string `json:"host"`
 	Port uint16 `json:"port"`
 	UnitID byte `json:"unit_id"`
@@ -123,7 +126,7 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	for _,d:=range cfg.Devices {
 		var seen *time.Time
 		if last:=s.Latest.LastSuccess(d.ID);!last.IsZero(){seen=&last}
-		items=append(items,deviceView{ID:d.ID,Name:d.Name,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
+		items=append(items,deviceView{ID:d.ID,Name:d.Name,Protocol:d.Protocol,DiscoveryOnly:d.DiscoveryOnly,MeterAddress:d.MeterAddress,Host:d.Host,Port:d.Port,UnitID:d.UnitID,Model:d.Model,IntervalMS:d.Interval.Milliseconds(),Enabled:d.Enabled,PointCount:pointCounts[d.Model],LastSeen:seen})
 	}
 	writeJSON(w,http.StatusOK,items)
 }
