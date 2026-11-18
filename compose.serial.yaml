@@ -1,0 +1,9 @@
+# Optional overlay for deployments using a local USB/RS485 serial adapter.
+# Set RS485_DEVICE to the host device path and RS485_GID to its numeric group ID.
+# The container receives only this device; privileged mode is not enabled.
+services:
+  collector:
+    devices:
+      - "${RS485_DEVICE:-/dev/ttyUSB0}:${RS485_CONTAINER_DEVICE:-/dev/ttyUSB0}"
+    group_add:
+      - "${RS485_GID:?Set RS485_GID to the serial device group ID}"
