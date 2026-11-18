@@ -20,7 +20,7 @@ func LoadXLSX(path string) (Config, error) {
 
 	var c Config
 	if c.Devices, err = readDevices(f); err != nil { return Config{}, err }
-	if c.Points, err = readPoints(f); err != nil { return Config{}, err }
+	if c.Points, err = readPoints(f, c.Devices); err != nil { return Config{}, err }
 	if c.Processing, err = readProcessing(f); err != nil { return Config{}, err }
 	if c.WriteRules, err = readWriteRules(f); err != nil { return Config{}, err }
 	if c.Enums, err = readEnums(f); err != nil { return Config{}, err }
@@ -96,7 +96,7 @@ func readDevices(f *excelize.File) ([]Device, error) {
 	}
 	return out, nil
 }
-func readPoints(f *excelize.File) ([]Point, error) {
+func readPoints(f *excelize.File, devices []Device) ([]Point, error) {
 	rows, cols, err := sheetRows(f, "Points", "model", "point_code", "function", "address", "type", "length", "scale", "offset", "rw", "enabled")
 	if err != nil { return nil, err }
 	out := make([]Point, 0, len(rows))
@@ -120,7 +120,7 @@ func readPoints(f *excelize.File) ([]Point, error) {
 		if count == 0 { count = int64(registerWidths[dtype]) }
 		if dtype == "STRING" && count == 0 { count = length }
 		isDLT645 := false
-		for _, device := range c.Devices { if device.Model == model && device.Protocol == "dl-t645-2007" { isDLT645 = true; break } }
+		for _, device := range devices { if device.Model == model && device.Protocol == "dl-t645-2007" { isDLT645 = true; break } }
 		if count < 1 || count > 4096 { return nil, rowErr("Points", i, fmt.Errorf("invalid length/count: %d", count)) }
 		if !isDLT645 && fn >= 3 && count > 125 { return nil, rowErr("Points", i, fmt.Errorf("register read length exceeds 125")) }
 		if !isDLT645 && uint64(addr)+uint64(count) > 65536 { return nil, rowErr("Points", i, fmt.Errorf("address range exceeds 65535")) }
