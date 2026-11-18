@@ -82,7 +82,6 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 						}
 					}
 				}
-				}
 				_ = conn.Close()
 			}
 		}
