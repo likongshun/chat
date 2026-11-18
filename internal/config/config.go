@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"encoding/hex"
 	"math"
 	"time"
 )
@@ -93,6 +94,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate device id %q", d.ID)
 		}
 		if d.Protocol != "" && d.Protocol != "modbus-tcp" && d.Protocol != "dl-t645-2007" { return fmt.Errorf("device %s: unsupported protocol %q", d.ID, d.Protocol) }
+		if d.Protocol == "dl-t645-2007" && (len(d.MeterAddress) != 12 || !allDigits(d.MeterAddress)) { return fmt.Errorf("device %s: DL/T645 meter_address must be 12 decimal digits", d.ID) }
 		if d.Port == 0 || d.Interval < 100*time.Millisecond {
 			return fmt.Errorf("device %s: port must be set and interval must be >=100ms", d.ID)
 		}
@@ -113,6 +115,7 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate point %q", key)
 		}
 		pointKeys[key] = true
+		for _, d := range c.Devices { if d.Model == p.Model && d.Protocol == "dl-t645-2007" && p.Enabled { raw, err := hex.DecodeString(p.DataID); if err != nil || len(raw) != 4 { return fmt.Errorf("point %s: DL/T645 data_id must be 8 hexadecimal digits", key) } } }
 		if p.Model == "" {
 			if _, ok := devices[p.DeviceID]; !ok {
 				return fmt.Errorf("point %s references unknown device %s", key, p.DeviceID)
@@ -236,3 +239,10 @@ func (c Config) Validate() error {
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' { return false }
+	}
+	return true
+}
