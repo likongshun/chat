@@ -82,10 +82,11 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 					var frame dlt645.Frame
 					frame, err = read645Frame(conn, address)
 					if err == nil {
-						err = validateReadResponseControl(frame.Control)
+						var payload []byte
+						payload, err = read645Payload(conn, frame, address, pt.DataID, timeout, ctx)
 						if err == nil {
 							var decoded float64
-							decoded, err = decode645Value(frame.Data, pt.DataID, pt.DataType, pt.Count, pt.Scale, pt.Offset)
+							decoded, err = decode645Value(payload, pt.DataID, pt.DataType, pt.Count, pt.Scale, pt.Offset)
 							if err == nil {
 								var value any = decoded
 								value, err = processing.Apply(pt.PointCode, value, p.Config.Processing, p.Config.Enums)
@@ -124,19 +125,44 @@ func writeAll(w io.Writer, data []byte) error {
 }
 
 func validateReadResponseControl(control byte) error {
-	// 0x91 is a normal read-data response; 0xD1 is the error response.
-	// Reject write acknowledgements and all unrelated function codes.
-	if control&0x80 == 0 || control&0x0f != 0x01 {
+	if control&0x80 == 0 || control&0x1f != 0x01 {
 		return fmt.Errorf("unexpected DL/T645 read response control code 0x%02x", control)
 	}
-	if control&0x40 != 0 {
-		return fmt.Errorf("meter returned DL/T645 error response (control 0x%02x)", control)
-	}
-	if control&0x20 != 0 {
-		return fmt.Errorf("DL/T645 multi-frame response is not supported yet (control 0x%02x)", control)
-	}
+	if control&0x40 != 0 { return fmt.Errorf("meter returned DL/T645 error response (control 0x%02x)", control) }
 	return nil
 }
+
+func read645Payload(conn net.Conn, frame dlt645.Frame, address, dataID string, timeout time.Duration, ctx context.Context) ([]byte, error) {
+	if err := validateReadResponseControl(frame.Control); err != nil { return nil, err }
+	if len(frame.Data) < 4 { return nil, dlt645.ErrFrame }
+	id := strings.ToUpper(hex.EncodeToString([]byte{frame.Data[3], frame.Data[2], frame.Data[1], frame.Data[0]}))
+	if id != strings.ToUpper(strings.TrimSpace(dataID)) { return nil, fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s", id, dataID) }
+	payload := append([]byte(nil), frame.Data[4:]...)
+	if frame.Control&0x20 == 0 { return payloadWithID(frame.Data), nil }
+	for seq := byte(1); ; seq++ {
+		if seq == 0 { return nil, fmt.Errorf("DL/T645 follow-up frame sequence exhausted") }
+		request, err := dlt645.EncodeReadFollow(address, dataID, seq)
+		if err != nil { return nil, err }
+		deadline := time.Now().Add(timeout)
+		if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
+		if err := conn.SetDeadline(deadline); err != nil { return nil, err }
+		if err := writeAll(conn, request); err != nil { return nil, err }
+		next, err := read645Frame(conn, address)
+		if err != nil { return nil, err }
+		if next.Control != 0x92 && next.Control != 0xB2 {
+			return nil, fmt.Errorf("unexpected DL/T645 follow-up response control code 0x%02x", next.Control)
+		}
+		if len(next.Data) < 5 { return nil, dlt645.ErrFrame }
+		nextID := strings.ToUpper(hex.EncodeToString([]byte{next.Data[3], next.Data[2], next.Data[1], next.Data[0]}))
+		if nextID != strings.ToUpper(strings.TrimSpace(dataID)) { return nil, fmt.Errorf("DL/T645 follow-up data identifier mismatch: got %s want %s", nextID, dataID) }
+		gotSeq := next.Data[len(next.Data)-1]
+		if gotSeq != seq { return nil, fmt.Errorf("DL/T645 follow-up sequence mismatch: got %d want %d", gotSeq, seq) }
+		payload = append(payload, next.Data[4:len(next.Data)-1]...)
+		if next.Control&0x20 == 0 { return append([]byte{frame.Data[0], frame.Data[1], frame.Data[2], frame.Data[3]}, payload...), nil }
+	}
+}
+
+func payloadWithID(data []byte) []byte { return append([]byte(nil), data...) }
 
 func isNetworkError(err error) bool {
 	var netErr net.Error
