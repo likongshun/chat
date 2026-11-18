@@ -89,8 +89,8 @@ func decodeAddress(b []byte) (string, error) {
 	var out strings.Builder
 	for i:=5; i>=0; i-- {
 		if b[i]>>4 > 9 || b[i]&0x0f > 9 { return "", ErrFrame }
-		out.WriteByte('0'+b[i]>>4)
-		out.WriteByte('0'+(b[i]&0x0f))
+		out.WriteByte('0' + (b[i] >> 4))
+		out.WriteByte('0' + (b[i] & 0x0f))
 	}
 	return out.String(), nil
 }
