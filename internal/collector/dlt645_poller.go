@@ -105,7 +105,6 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 			err = dialErr
 			if err == nil {
 				stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
-				defer stopCancel()
 				deadline := time.Now().Add(timeout)
 				if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) { deadline = dl }
 				_ = conn.SetDeadline(deadline)
@@ -128,6 +127,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 					}
 				}
 				_ = conn.Close()
+				stopCancel()
 			}
 		}
 		if err != nil {
