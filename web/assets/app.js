@@ -52,6 +52,18 @@ function drawHistory(rows){const values=rows.map(x=>Number(x.value)).filter(Numb
 async function queryHistory(){const device=$('history-device').value,point=$('history-point').value;if(!device||!point){toast('请先选择设备和测点');return}selectedDevice=device;selectedPoint=point;const hours=Number($('history-range').value||24);const to=new Date(),from=new Date(to.getTime()-hours*3600000);const params=new URLSearchParams({device_id:device,point_id:point,from:from.toISOString(),to:to.toISOString(),limit:'1000'});set('history-status','正在查询…');try{const response=await fetch('/api/v1/telemetry?'+params.toString(),{cache:'no-store'});if(!response.ok){let message='HTTP '+response.status;try{message=(await response.text())||message}catch{}throw Error(message)}historyRows=await response.json();renderHistory();set('history-status','查询完成 · '+historyRows.length+' 条')}catch(e){set('history-status','查询失败');const body=clearBody('history-body');const tr=document.createElement('tr');cell(tr,'历史查询失败：'+e.message,'td','empty');body.appendChild(tr);$('history-line').setAttribute('d','');$('history-area').setAttribute('d','')}}
 function renderHistory(){const body=clearBody('history-body');set('history-points-count',historyRows.length+' 个数据点');if(!historyRows.length){const tr=document.createElement('tr');cell(tr,'该时间范围内没有历史记录','td','empty');body.appendChild(tr);$('history-line').setAttribute('d','');$('history-area').setAttribute('d','');set('history-minmax','最小值 — · 最大值 —');return}for(const row of historyRows.slice().reverse()){const tr=document.createElement('tr');cell(tr,localTime(row.timestamp));cell(tr,String(row.value));cell(tr,row.quality||'—','td',row.quality==='good'?'state-good':'');body.appendChild(tr)}drawHistory(historyRows)}
 
+
+async function loadDLT645Templates(){
+ const query=$('dlt-template-query').value.trim();
+ const body=clearBody('dlt-template-body');
+ try{
+  const response=await fetch('/api/v1/dlt645/templates'+(query?'?q='+encodeURIComponent(query):''),{cache:'no-store'});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const rows=await response.json();set('dlt-template-count',rows.length+' 个模板');
+  if(!rows.length){const tr=document.createElement('tr');const td=cell(tr,'没有匹配的数据标识','td','empty');td.colSpan=8;body.appendChild(tr);return}
+  for(const item of rows){const tr=document.createElement('tr');cell(tr,item.id);cell(tr,item.name);cell(tr,item.category);cell(tr,item.data_type);cell(tr,item.length+' B');cell(tr,item.scale);cell(tr,item.unit);cell(tr,item.notes);body.appendChild(tr)}
+ }catch(e){const tr=document.createElement('tr');const td=cell(tr,'模板加载失败：'+e.message,'td','empty');td.colSpan=8;body.appendChild(tr);set('dlt-template-count','不可用')}
+}
 async function discoverSelectedMeter(){
  const device=devices.find(d=>d.id===selectedDevice);
  if(!device){toast('请先选择设备');return}
@@ -67,6 +79,8 @@ async function discoverSelectedMeter(){
  finally{button.disabled=false}
 }
 $('meter-discover').addEventListener('click',discoverSelectedMeter);
+$('dlt-template-search').addEventListener('click',loadDLT645Templates);
+$('dlt-template-query').addEventListener('keydown',e=>{if(e.key==='Enter')loadDLT645Templates()});
 $('refresh').addEventListener('click',()=>{refresh();loadDevices();toast('正在刷新数据')});
 $('devices-refresh').addEventListener('click',loadDevices);
 $('device-search').addEventListener('input',e=>{deviceQuery=e.target.value.trim();devicePage=1;renderDevices()});
@@ -75,4 +89,4 @@ $('device-next').addEventListener('click',()=>{devicePage++;renderDevices()});
 $('history-device').addEventListener('change',async e=>{await selectDevice(e.target.value);});
 $('history-point').addEventListener('change',e=>{selectedPoint=e.target.value});
 $('history-query').addEventListener('click',queryHistory);
-refresh();loadDevices();setInterval(refresh,5000);setInterval(loadDevices,15000);
+refresh();loadDevices();loadDLT645Templates();setInterval(refresh,5000);setInterval(loadDevices,15000);
