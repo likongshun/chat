@@ -26,22 +26,32 @@ type DL645Poller struct {
 	ConfigVersion int64
 	Timeout time.Duration
 	mu sync.Mutex
-	gateways map[string]*sync.Mutex
+	gateways map[string]chan struct{}
 }
 
 func (p *DL645Poller) Protocol() string { return "dl-t645-2007" }
 func (p *DL645Poller) Close() error { return nil }
 
+func (p *DL645Poller) acquireGateway(ctx context.Context, gateway string) (func(), error) {
+	p.mu.Lock()
+	if p.gateways == nil { p.gateways = make(map[string]chan struct{}) }
+	sem := p.gateways[gateway]
+	if sem == nil { sem = make(chan struct{}, 1); p.gateways[gateway] = sem }
+	p.mu.Unlock()
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, error) {
 	if !d.Enabled { return nil, nil }
 	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
-	p.mu.Lock()
-	if p.gateways == nil { p.gateways = make(map[string]*sync.Mutex) }
-	lock := p.gateways[gateway]
-	if lock == nil { lock = &sync.Mutex{}; p.gateways[gateway] = lock }
-	p.mu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
+	release, err := p.acquireGateway(ctx, gateway)
+	if err != nil { return nil, err }
+	defer release()
 
 	address := strings.TrimSpace(d.MeterAddress)
 	if address == "" { return nil, fmt.Errorf("device %s: meter_address is required for DL/T645", d.ID) }
