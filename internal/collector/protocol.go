@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -47,5 +48,5 @@ func (r *ProtocolRouter) Close() error {
 		seen[engine] = true
 		if err := engine.Close(); err != nil { errs = append(errs, err) }
 	}
-	return errorsJoin(errs)
+	return errors.Join(errs)
 }
