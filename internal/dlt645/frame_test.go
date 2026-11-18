@@ -34,3 +34,10 @@ func TestEncodeRejectsInvalidInputs(t *testing.T) {
 	if _, err := EncodeReadData("123", "00010000"); err == nil { t.Fatal("expected address validation") }
 	if _, err := EncodeReadData("123456789012", "1234"); err == nil { t.Fatal("expected data ID validation") }
 }
+
+func TestEncodeReadFollow(t *testing.T) {
+	req, err := EncodeReadFollow("123456789012", "00010000", 1)
+	if err != nil { t.Fatal(err) }
+	if req[8] != ReadFollow || req[9] != 5 || req[len(req)-1] != FrameEnd { t.Fatalf("bad follow request: %x", req) }
+	if !bytes.Equal(req[10:15], []byte{0x33,0x33,0x34,0x33,0x34}) { t.Fatalf("unexpected follow payload: %x", req[10:15]) }
+}
