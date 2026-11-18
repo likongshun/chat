@@ -99,7 +99,9 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 		s.EventID = fmt.Sprintf("%s/%s/%d", d.ID, pt.PointCode, now.UnixNano())
 		request, err := dlt645.EncodeReadData(address, pt.DataID)
 		if err == nil {
-			conn, dialErr := (&net.Dialer{Timeout:timeout}).DialContext(ctx, "tcp", gateway)
+			transport := p.Transport
+			if transport == nil { transport = dlt645.TCPTransport{} }
+			conn, dialErr := transport.Open(ctx, gateway, timeout)
 			err = dialErr
 			if err == nil {
 				stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
