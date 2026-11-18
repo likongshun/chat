@@ -88,7 +88,7 @@ func readDevices(f *excelize.File) ([]Device, error) {
 		if unit < 0 || unit > 255 { return nil, rowErr("Devices", i, fmt.Errorf("unit_id out of range: %d", unit)) }
 		if poll < 100 || poll > int64((1<<63-1)/int64(time.Millisecond)) { return nil, rowErr("Devices", i, fmt.Errorf("poll_ms out of range: %d", poll)) }
 		out = append(out, Device{
-			ID: value(r, cols, "device_id"), Name: value(r, cols, "name"),
+			ID: value(r, cols, "device_id"), Protocol: strings.ToLower(value(r, cols, "protocol")), Name: value(r, cols, "name"),
 			Host: value(r, cols, "host"), Port: uint16(port), UnitID: byte(unit),
 			Model: value(r, cols, "model"), Interval: time.Duration(poll)*time.Millisecond, Enabled: enabled,
 		})
@@ -122,7 +122,7 @@ func readPoints(f *excelize.File) ([]Point, error) {
 		if fn >= 3 && count > 125 { return nil, rowErr("Points", i, fmt.Errorf("register read length exceeds 125")) }
 		if uint64(addr)+uint64(count) > 65536 { return nil, rowErr("Points", i, fmt.Errorf("address range exceeds 65535")) }
 		out = append(out, Point{
-			ID: model + "/" + code, Model: model, PointCode: code, Name: value(r, cols, "name"),
+			ID: model + "/" + code, Model: model, PointCode: code, DataID: strings.ToUpper(value(r, cols, "data_id")), Name: value(r, cols, "name"),
 			Address: uint16(addr), Count: uint16(count), Function: byte(fn), DataType: dtype,
 			Scale: scale, Offset: offset, ByteOrder: strings.ToUpper(value(r, cols, "byte_order")),
 			WordOrder: strings.ToUpper(value(r, cols, "word_order")), Unit: value(r, cols, "unit"),
