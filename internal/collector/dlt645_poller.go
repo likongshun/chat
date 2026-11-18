@@ -131,7 +131,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 		if err == nil {
 			transport := p.Transport
 			if transport == nil { transport = dlt645.DefaultTransport{} }
-			conn, dialErr := transport.Open(ctx, gateway, timeout)
+			conn, dialErr := transport.Open(ctx, endpoint, timeout)
 			err = dialErr
 			if err == nil {
 				stopCancel := context.AfterFunc(ctx, func() { _ = conn.Close() })
