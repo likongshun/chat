@@ -88,7 +88,7 @@ func readDevices(f *excelize.File) ([]Device, error) {
 		if unit < 0 || unit > 255 { return nil, rowErr("Devices", i, fmt.Errorf("unit_id out of range: %d", unit)) }
 		if poll < 100 || poll > int64((1<<63-1)/int64(time.Millisecond)) { return nil, rowErr("Devices", i, fmt.Errorf("poll_ms out of range: %d", poll)) }
 		out = append(out, Device{
-			ID: value(r, cols, "device_id"), Protocol: strings.ToLower(value(r, cols, "protocol")), Name: value(r, cols, "name"),
+			ID: value(r, cols, "device_id"), Protocol: strings.ToLower(value(r, cols, "protocol")), MeterAddress: value(r, cols, "meter_address"), Name: value(r, cols, "name"),
 			Host: value(r, cols, "host"), Port: uint16(port), UnitID: byte(unit),
 			Model: value(r, cols, "model"), Interval: time.Duration(poll)*time.Millisecond, Enabled: enabled,
 		})
