@@ -9,6 +9,7 @@ func TestEncodeReadDataAndDecodeResponse(t *testing.T) {
 	req, err := EncodeReadData("123456789012", "00010000")
 	if err != nil { t.Fatal(err) }
 	if len(req) != 16 || req[0] != FrameStart || req[7] != FrameStart || req[8] != ReadData || req[len(req)-1] != FrameEnd { t.Fatalf("bad request: %x", req) }
+	if !bytes.Equal(req[10:14], []byte{0x33,0x33,0x34,0x33}) { t.Fatalf("unexpected DI wire order: %x", req[10:14]) }
 	// Response payload is data ID + one BCD byte, with 0x33 added on wire.
 	payload := []byte{0x33,0x34,0x33,0x33,0x34}
 	wirePayload := append([]byte(nil), payload...)
