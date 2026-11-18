@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -69,7 +70,7 @@ func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.D
 		_ = port.Close()
 		return nil, fmt.Errorf("set serial read timeout: %w", err)
 	}
-	s := &serialSession{port: port}
+	s := &serialSession{port: port, closed: make(chan struct{})}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -83,23 +84,18 @@ func (SerialTransport) Open(ctx context.Context, endpoint string, timeout time.D
 type serialSession struct {
 	port serial.Port
 	closed chan struct{}
-	closeOnce chan struct{}
+	closeOnce sync.Once
+	closeErr error
 }
 
 func (s *serialSession) Read(p []byte) (int, error)  { return s.port.Read(p) }
 func (s *serialSession) Write(p []byte) (int, error) { return s.port.Write(p) }
 func (s *serialSession) Close() error {
-	if s.closeOnce == nil {
-		s.closeOnce = make(chan struct{})
-	}
-	select {
-	case <-s.closeOnce:
-		return nil
-	default:
-		close(s.closeOnce)
+	s.closeOnce.Do(func() {
 		close(s.closed)
-		return s.port.Close()
-	}
+		s.closeErr = s.port.Close()
+	})
+	return s.closeErr
 }
 func (s *serialSession) LocalAddr() net.Addr                { return serialAddr("local") }
 func (s *serialSession) RemoteAddr() net.Addr               { return serialAddr("serial") }
