@@ -85,7 +85,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 						err = validateReadResponseControl(frame.Control)
 						if err == nil {
 							var decoded float64
-							decoded, err = decode645Value(frame.Data, pt.DataID, pt.Scale, pt.Offset)
+							decoded, err = decode645Value(frame.Data, pt.DataID, pt.DataType, pt.Count, pt.Scale, pt.Offset)
 							if err == nil {
 								var value any = decoded
 								value, err = processing.Apply(pt.PointCode, value, p.Config.Processing, p.Config.Enums)
@@ -143,26 +143,37 @@ func isNetworkError(err error) bool {
 	return errors.As(err, &netErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
-func decode645Value(data []byte, expectedID string, scale, offset float64) (float64, error) {
+func decode645Value(data []byte, expectedID, dataType string, count uint16, scale, offset float64) (float64, error) {
 	if len(data) < 5 { return 0, fmt.Errorf("DL/T645 payload too short: %d", len(data)) }
 	id := strings.ToUpper(hex.EncodeToString([]byte{data[3], data[2], data[1], data[0]}))
-	if id != strings.ToUpper(expectedID) { return 0, fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s", id, expectedID) }
-	digits := make([]byte, 0, (len(data)-4)*2)
-	for _, b := range data[4:] {
-		lo, hi := b&0x0f, b>>4
-		if lo > 9 || hi > 9 { return 0, fmt.Errorf("invalid BCD byte 0x%02x", b) }
-		digits = append(digits, '0'+lo, '0'+hi)
+	if id != strings.ToUpper(strings.TrimSpace(expectedID)) { return 0, fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s", id, expectedID) }
+	if count == 0 || count > 32 { return 0, fmt.Errorf("invalid DL/T645 data length %d", count) }
+	payload := data[4:]
+	if len(payload) != int(count) { return 0, fmt.Errorf("DL/T645 data length mismatch: got %d want %d", len(payload), count) }
+	if dataType != "BCD" && dataType != "BCD_SIGNED" { return 0, fmt.Errorf("unsupported DL/T645 data type %q", dataType) }
+	digits := make([]byte, 0, len(payload)*2)
+	for i := len(payload)-1; i >= 0; i-- {
+		b := payload[i]
+		hi, lo := b>>4, b&0x0f
+		if hi > 9 || lo > 9 { return 0, fmt.Errorf("invalid BCD byte 0x%02x", b) }
+		digits = append(digits, '0'+hi, '0'+lo)
 	}
-	n, err := strconv.ParseFloat(string(reverseDigits(digits)), 64)
+	negative := false
+	if dataType == "BCD_SIGNED" && len(digits) > 0 {
+		// DL/T645 signed BCD commonly uses the high nibble of the most
+		// significant byte as a sign marker. Accept 0xB as negative.
+		msb := payload[len(payload)-1]
+		if msb>>4 == 0x0B {
+			negative = true
+			digits[0] = '0'
+		}
+	}
+	n, err := strconv.ParseFloat(string(digits), 64)
 	if err != nil { return 0, fmt.Errorf("decode DL/T645 BCD: %w", err) }
+	if negative { n = -n }
 	return n*scale + offset, nil
 }
 
-func reverseDigits(in []byte) []byte {
-	out := make([]byte, len(in))
-	for i := range in { out[len(in)-1-i] = in[i] }
-	return out
-}
 
 func read645Frame(r io.Reader, expectedAddress string) (dlt645.Frame, error) {
 	// Optical/RS485 adapters may prepend 0xFE wake-up bytes.
