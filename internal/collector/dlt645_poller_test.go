@@ -137,3 +137,9 @@ func test645RawFrame(address string, control byte, data []byte) []byte {
 	for _, b := range out { sum += b }
 	return append(out, sum, 0x16)
 }
+
+func TestDecode645SignedBCD(t *testing.T) {
+	got, err := decode645Value([]byte{0,0,1,0,0x34,0xB2}, "00010000", "BCD_SIGNED", 2, 0.01, 0)
+	if err != nil { t.Fatal(err) }
+	if math.Abs(got-(-2.34)) > 1e-9 { t.Fatalf("got %v, want -2.34", got) }
+}
