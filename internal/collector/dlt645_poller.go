@@ -73,7 +73,7 @@ func (p *DL645Poller) DiscoverMeter(ctx context.Context, d config.Device) (strin
 }
 
 func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, error) {
-	if !d.Enabled { return nil, nil }
+	if !d.Enabled || d.DiscoveryOnly { return nil, nil }
 	gateway := net.JoinHostPort(d.Host, strconv.Itoa(int(d.Port)))
 	release, err := p.acquireGateway(ctx, gateway)
 	if err != nil { return nil, err }
