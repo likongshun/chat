@@ -15,6 +15,7 @@ import (
 
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/dlt645"
 )
 
 type InfluxQueryOptions struct {
@@ -65,6 +66,21 @@ func (s *Server) registerDataAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/devices/", s.devicePoints)
 	mux.HandleFunc("/api/v1/telemetry", s.queryTelemetry)
 	mux.HandleFunc("/api/v1/dlt645/discover", s.discoverDLT645Meter)
+	mux.HandleFunc("/api/v1/dlt645/templates", s.listDLT645Templates)
+}
+
+func (s *Server) listDLT645Templates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
+	items := dlt645.ListDataIDTemplates()
+	filtered := make([]dlt645.DataIDTemplate, 0, len(items))
+	for _, item := range items {
+		if category != "" && item.Category != category { continue }
+		if query != "" && !strings.Contains(strings.ToLower(item.ID+" "+item.Name+" "+item.Category+" "+item.Unit), query) { continue }
+		filtered = append(filtered, item)
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 type discoverMeterRequest struct { DeviceID string `json:"device_id"` }
