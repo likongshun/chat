@@ -57,6 +57,8 @@ func main() {
 		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
+	dlt645Poller := &collector.DL645Poller{Config: *configManager.Current(), Latest: latestSamples, ConfigVersion: configVersion, Timeout: envDuration("DLT645_TIMEOUT", 1500*time.Millisecond)}
+	router := &collector.ProtocolRouter{Engines: map[string]collector.ProtocolPoller{"modbus-tcp": poller, "dl-t645-2007": dlt645Poller}}
 	collectorMetrics := &collector.Metrics{}
 	deliveryMetrics := &pipeline.DeliveryMetrics{}
 	engine := &collector.Engine{
@@ -66,6 +68,7 @@ func main() {
 			Metrics: collectorMetrics,
 		},
 		Poller: poller,
+		Router: router,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -126,7 +129,7 @@ func main() {
 	if configRepo != nil {
 		go watchActiveConfiguration(ctx, configRepo, configVersion, envDuration("CONFIG_RELOAD_INTERVAL", 5*time.Second), updates)
 	}
-	if err := runCollection(ctx, engine, poller, configManager, cfg, configVersion, store, updates); err != nil {
+	if err := runCollection(ctx, engine, poller, dlt645Poller, configManager, cfg, configVersion, store, updates); err != nil {
 		log.Printf("collection stopped: %v", err)
 	}
 	cancelDelivery()
@@ -157,6 +160,7 @@ func runCollection(
 	ctx context.Context,
 	engine *collector.Engine,
 	poller *collector.ModbusPoller,
+	dlt645Poller *collector.DL645Poller,
 	manager *config.Manager,
 	cfg config.Config,
 	version int64,
@@ -176,6 +180,8 @@ func runCollection(
 				cfg = *manager.Current()
 				poller.Config = cfg
 				poller.ConfigVersion = update.Version
+				dlt645Poller.Config = cfg
+				dlt645Poller.ConfigVersion = update.Version
 				version = update.Version
 				log.Printf("activated configuration version %d", version)
 				continue
@@ -234,6 +240,8 @@ func runCollection(
 			cfg = *manager.Current()
 			poller.Config = cfg
 			poller.ConfigVersion = update.Version
+			dlt645Poller.Config = cfg
+			dlt645Poller.ConfigVersion = update.Version
 			version = update.Version
 			log.Printf("activated configuration version %d; devices=%d points=%d", version, len(cfg.Devices), len(cfg.Points))
 
