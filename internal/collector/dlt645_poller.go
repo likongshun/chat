@@ -3,13 +3,13 @@ package collector
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
+		"time"
 
 	"github.com/likongshun/chat/internal/config"
 	"github.com/likongshun/chat/internal/dlt645"
@@ -25,7 +25,6 @@ type DL645Poller struct {
 	Latest *LatestStore
 	ConfigVersion int64
 	Timeout time.Duration
-	mu sync.Mutex
 }
 
 func (p *DL645Poller) Protocol() string { return "dl-t645-2007" }
@@ -89,7 +88,7 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 		samples=append(samples,s)
 	}
 	if p.Latest!=nil { p.Latest.Update(samples) }
-	return samples,joinErrors(failures)
+	return samples,errors.Join(failures...)
 }
 
 func decode645Value(data []byte, expectedID string, scale, offset float64) (float64,error) {
@@ -101,9 +100,6 @@ func decode645Value(data []byte, expectedID string, scale, offset float64) (floa
 		lo,hi:=b&0x0f,b>>4
 		if lo>9 || hi>9 { return 0,fmt.Errorf("invalid BCD byte 0x%02x",b) }
 		digits=append(digits,'0'+lo,'0'+hi)
-	}
-	for len(digits)>1 && digits[len(digits)-1]=='0' { // retain integer precision; scale determines engineering value
-		break
 	}
 	n,err:=strconv.ParseFloat(string(reverseDigits(digits)),64)
 	if err!=nil { return 0,fmt.Errorf("decode DL/T645 BCD: %w",err) }
