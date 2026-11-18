@@ -26,7 +26,7 @@ async function loadDevices(){try{const response=await fetch('/api/v1/devices',{c
 function renderDevices(){
  const body=clearBody('devices-body');
  const q=deviceQuery.toLocaleLowerCase();
- const filtered=devices.filter(d=>[d.id,d.name,d.model,d.host,d.protocol,d.meter_address].some(v=>String(v||'').toLocaleLowerCase().includes(q)));
+ const filtered=devices.filter(d=>[d.id,d.name,d.model,d.host,d.protocol,d.transport,d.serial_port,d.meter_address].some(v=>String(v||'').toLocaleLowerCase().includes(q)));
  const pages=Math.max(1,Math.ceil(filtered.length/devicePageSize));
  devicePage=Math.min(devicePage,pages);
  const visible=filtered.slice((devicePage-1)*devicePageSize,devicePage*devicePageSize);
@@ -39,7 +39,8 @@ function renderDevices(){
   if(d.id===selectedDevice)tr.style.background='#f2f7ff';
   const name=cell(tr);
   const b=document.createElement('button');b.className='table-action';b.textContent=(d.name||d.id)+' · '+d.id;b.addEventListener('click',()=>selectDevice(d.id));name.appendChild(b);
-  cell(tr,d.protocol==='dl-t645-2007'?'DL/T645-2007':'Modbus TCP');cell(tr,d.model);cell(tr,d.protocol==='dl-t645-2007'?(d.meter_address||'待发现')+' · '+d.host+':'+d.port:d.host+':'+d.port);cell(tr,fmt(d.point_count));
+  const endpoint=d.transport==='serial'?(d.serial_port||'串口')+' · '+(d.baud_rate||9600)+' '+(d.data_bits||8)+(d.parity||'even').toUpperCase()+(d.stop_bits||1):d.host+':'+d.port;
+  cell(tr,d.protocol==='dl-t645-2007'?'DL/T645-2007':'Modbus TCP');cell(tr,d.model);cell(tr,d.protocol==='dl-t645-2007'?(d.meter_address||'待发现')+' · '+endpoint:endpoint);cell(tr,fmt(d.point_count));
   const fresh=d.last_seen&&Date.now()-new Date(d.last_seen).getTime()<Math.max(10000,(d.interval_ms||1000)*3);
   cell(tr,d.discovery_only?'待搜索':d.enabled?(fresh?'在线':'等待数据'):'已禁用','td',d.discovery_only?'':d.enabled?(fresh?'state-good':''):'state-bad');
   body.appendChild(tr);
