@@ -98,7 +98,7 @@ func TestRejectDLT645InvalidDataID(t *testing.T) {
 func TestValidateDLT645DiscoveryOnlyDevice(t *testing.T) {
 	c := Config{
 		Devices: []Device{{ID:"discover",Host:"127.0.0.1",Port:8000,Protocol:"dl-t645-2007",DiscoveryOnly:true,Model:"DLT",Interval:time.Second,Enabled:true}},
-		Points: []Point{{ID:"DLT/energy",Model:"DLT",PointCode:"energy",DataID:"00010000",Count:4,DataType:"BCD",Scale:0.01,Enabled:true}},
+		Points: nil,
 	}
 	if err := c.Validate(); err != nil { t.Fatal(err) }
 	c.Devices[0].DiscoveryOnly = false
