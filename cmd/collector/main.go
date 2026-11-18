@@ -54,7 +54,6 @@ func main() {
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
 		Latest: latestSamples,
-		DLT645: dlt645Poller,
 		ConfigVersion: configVersion,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
@@ -80,6 +79,7 @@ func main() {
 		Addr: envString("METRICS_ADDR", ":9090"),
 		Config: configManager,
 		Latest: latestSamples,
+		DLT645: dlt645Poller,
 		Influx: &observability.InfluxQueryOptions{URL: envString("INFLUXDB_URL", "http://influxdb:8086"), Org: envString("INFLUXDB_ORG", "modbus"), Bucket: envString("INFLUXDB_BUCKET", "telemetry"), Token: os.Getenv("INFLUXDB_TOKEN")},
 		Collector: collectorMetrics,
 		WAL: store,
