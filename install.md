@@ -173,7 +173,8 @@ INFLUXDB_ADMIN_TOKEN=替换为足够长的随机令牌
 | `CONFIG_IMPORT_ON_START` | `false` | 启动时导入工作簿并激活新配置版本 |
 | `CONFIG_RELOAD_INTERVAL` | `5s`（程序默认） | 活动配置版本轮询周期 |
 | `POLL_WORKERS` | `500` | 全局采集并发上限 |
-| `POLL_TIMEOUT` | `800ms` | 单次设备采集超时 |
+| `POLL_TIMEOUT` | `800ms` | Modbus 单次设备采集超时 |
+| `DLT645_TIMEOUT` | `1500ms` | DL/T645 透明网关单次请求超时 |
 | `SCHEDULER_OUTPUT_BUFFER` | `10000` | 采集结果缓冲容量 |
 | `LATEST_CACHE_MAX_POINTS` | `1500000` | 最新点位缓存容量上限；按设备数×点数及内存预算调整 |
 | `WAL_SEGMENT_BYTES` | `67108864` | WAL 分段阈值，单位字节 |
