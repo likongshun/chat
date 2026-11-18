@@ -169,3 +169,22 @@ func TestRead645PayloadRejectsAssembledLengthOverflow(t *testing.T) {
 	if err==nil || !strings.Contains(err.Error(),"exceeds 4096 bytes"){t.Fatalf("expected assembled length rejection, got %v",err)}
 	if serverErr:=<-serverErr;serverErr!=nil{t.Fatal(serverErr)}
 }
+
+func TestSerialDevicesOnSamePhysicalPortShareBusLockKey(t *testing.T) {
+	a := config.Device{Transport:"serial", SerialPort:"/dev/ttyUSB0", BaudRate:2400}
+	b := config.Device{Transport:"serial", SerialPort:"/dev/ttyUSB0", BaudRate:9600}
+	if dlt645BusKey(a) != dlt645BusKey(b) {
+		t.Fatalf("same physical serial port must share lock: %q != %q", dlt645BusKey(a), dlt645BusKey(b))
+	}
+	if dlt645Endpoint(a) == dlt645Endpoint(b) {
+		t.Fatal("different serial modes should produce distinct endpoints")
+	}
+}
+
+func TestTCPDevicesUseGatewayAsBusLockKey(t *testing.T) {
+	a := config.Device{Host:"127.0.0.1", Port:4001}
+	b := config.Device{Host:"127.0.0.1", Port:4001}
+	if dlt645BusKey(a) != dlt645BusKey(b) {
+		t.Fatal("devices sharing a TCP gateway must share the bus lock")
+	}
+}
