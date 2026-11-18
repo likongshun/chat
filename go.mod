@@ -10,3 +10,5 @@ require github.com/eclipse/paho.mqtt.golang v1.5.0
 require github.com/jackc/pgx/v5 v5.7.2
 
 require go.bug.st/serial v1.6.4
+
+require github.com/creack/pty v1.1.24
