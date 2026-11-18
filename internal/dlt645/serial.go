@@ -111,6 +111,7 @@ type serialSession struct {
 	closed chan struct{}
 	deadlineMu sync.Mutex
 	readDeadline time.Time
+	writeDeadline time.Time
 	closeOnce sync.Once
 	closeErr error
 }
@@ -142,13 +143,39 @@ func (s *serialSession) Read(p []byte) (int, error) {
 	return n, err
 }
 func (s *serialSession) Write(p []byte) (int, error) {
-	n, err := s.port.Write(p)
-	if err == nil && n > 0 {
-		// Drain before switching to receive mode; this prevents a half-duplex
-		// RS485 adapter from truncating the tail of a request still in flight.
-		err = s.port.Drain()
+	s.deadlineMu.Lock()
+	deadline := s.writeDeadline
+	s.deadlineMu.Unlock()
+	write := func() (int, error) {
+		n, err := s.port.Write(p)
+		if err == nil && n > 0 {
+			// Drain before switching to receive mode; this prevents a half-duplex
+			// RS485 adapter from truncating the tail of a request still in flight.
+			err = s.port.Drain()
+		}
+		return n, err
 	}
-	return n, err
+	if deadline.IsZero() {
+		return write()
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0, os.ErrDeadlineExceeded
+	}
+	type writeResult struct { n int; err error }
+	done := make(chan writeResult, 1)
+	go func() { n, err := write(); done <- writeResult{n: n, err: err} }()
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case result := <-done:
+		return result.n, result.err
+	case <-timer.C:
+		_ = s.Close()
+		return 0, os.ErrDeadlineExceeded
+	case <-s.closed:
+		return 0, net.ErrClosed
+	}
 }
 func (s *serialSession) Close() error {
 	s.closeOnce.Do(func() {
@@ -159,8 +186,18 @@ func (s *serialSession) Close() error {
 }
 func (s *serialSession) LocalAddr() net.Addr                { return serialAddr("local") }
 func (s *serialSession) RemoteAddr() net.Addr               { return serialAddr("serial") }
-func (s *serialSession) SetDeadline(t time.Time) error      { return s.SetReadDeadline(t) }
-func (s *serialSession) SetWriteDeadline(time.Time) error   { return nil }
+func (s *serialSession) SetDeadline(t time.Time) error {
+	if err := s.SetReadDeadline(t); err != nil {
+		return err
+	}
+	return s.SetWriteDeadline(t)
+}
+func (s *serialSession) SetWriteDeadline(t time.Time) error {
+	s.deadlineMu.Lock()
+	s.writeDeadline = t
+	s.deadlineMu.Unlock()
+	return nil
+}
 func (s *serialSession) SetReadDeadline(t time.Time) error {
 	s.deadlineMu.Lock()
 	s.readDeadline = t
