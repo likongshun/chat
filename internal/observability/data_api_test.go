@@ -93,7 +93,7 @@ func (t discoveryTestTransport) Open(ctx context.Context, endpoint string, timeo
 func TestDLT645MeterDiscoveryAPI(t *testing.T) {
 	cfg := config.Config{
 		Devices: []config.Device{{ID:"find-meter",Host:"127.0.0.1",Port:4001,Protocol:"dl-t645-2007",DiscoveryOnly:true,Model:"DLT",Interval:time.Second,Enabled:true}},
-		Points: []config.Point{{ID:"DLT/energy",Model:"DLT",PointCode:"energy",DataID:"00010000",Count:4,DataType:"BCD",Scale:0.01,Enabled:true}},
+		Points: nil,
 	}
 	manager, err := config.NewManager(cfg); if err != nil { t.Fatal(err) }
 	poller := &collector.DL645Poller{Timeout:time.Second,Transport:discoveryTestTransport{address:"123456789012"}}
