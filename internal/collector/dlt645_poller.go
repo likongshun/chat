@@ -211,22 +211,20 @@ func decode645Value(data []byte, expectedID, dataType string, count uint16, scal
 	if len(payload) != int(count) { return 0, fmt.Errorf("DL/T645 data length mismatch: got %d want %d", len(payload), count) }
 	if dataType != "BCD" && dataType != "BCD_SIGNED" { return 0, fmt.Errorf("unsupported DL/T645 data type %q", dataType) }
 	digits := make([]byte, 0, len(payload)*2)
-	for i := len(payload)-1; i >= 0; i-- {
+	negative := false
+	mostSignificant := len(payload)-1
+	signedMarker := dataType == "BCD_SIGNED" && payload[mostSignificant]>>4 == 0x0B
+	for i := mostSignificant; i >= 0; i-- {
 		b := payload[i]
 		hi, lo := b>>4, b&0x0f
+		if i == mostSignificant && signedMarker {
+			negative = true
+			hi = 0
+		}
 		if hi > 9 || lo > 9 { return 0, fmt.Errorf("invalid BCD byte 0x%02x", b) }
 		digits = append(digits, '0'+hi, '0'+lo)
 	}
-	negative := false
-	if dataType == "BCD_SIGNED" && len(digits) > 0 {
-		// DL/T645 signed BCD commonly uses the high nibble of the most
-		// significant byte as a sign marker. Accept 0xB as negative.
-		msb := payload[len(payload)-1]
-		if msb>>4 == 0x0B {
-			negative = true
-			digits[0] = '0'
-		}
-	}
+
 	n, err := strconv.ParseFloat(string(digits), 64)
 	if err != nil { return 0, fmt.Errorf("decode DL/T645 BCD: %w", err) }
 	if negative { n = -n }
