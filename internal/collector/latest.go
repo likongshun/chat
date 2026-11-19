@@ -160,3 +160,15 @@ func qualityReasonCode(quality Quality,detail string) string {
   return "PROTOCOL_ERROR"
  }
 }
+
+func (s *LatestStore) QualityCounts() map[Quality]uint64 {
+ out:=map[Quality]uint64{
+  QualityGood:0,QualityBad:0,QualityCommError:0,
+  QualityUncertain:0,QualityStale:0,
+ }
+ if s==nil { return out }
+ s.mu.RLock()
+ for _,sample:=range s.items { out[sample.Quality]++ }
+ s.mu.RUnlock()
+ return out
+}
