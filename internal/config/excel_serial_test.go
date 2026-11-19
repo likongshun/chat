@@ -39,3 +39,17 @@ func TestReadDevicesParsesNativeSerialSettings(t *testing.T) {
 		t.Fatalf("serial settings not parsed: %#v", d)
 	}
 }
+
+
+func TestReadPointsParsesOptionalDLT645DataFormat(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	if err := f.SetSheetName("Sheet1", "Points"); err != nil { t.Fatal(err) }
+	headers := []interface{}{"model","point_code","function","address","type","length","scale","offset","rw","enabled","data_id","data_format"}
+	values := []interface{}{"METER","voltage_a","3","0","BCD","2","1","0","R","TRUE","02010100","XXX.X"}
+	if err := f.SetSheetRow("Points","A1",&headers); err != nil { t.Fatal(err) }
+	if err := f.SetSheetRow("Points","A2",&values); err != nil { t.Fatal(err) }
+	points, err := readPoints(f, []Device{{Model:"METER",Protocol:"dl-t645-2007"}})
+	if err != nil { t.Fatal(err) }
+	if len(points)!=1 || points[0].DataFormat!="XXX.X" { t.Fatalf("data format not loaded: %#v",points) }
+}
