@@ -20,7 +20,7 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [x] Track last attempt/success/error and consecutive failures.
 - [x] Add fixed latency buckets and max/total latency counters.
 - [x] Expose fleet/protocol counters with bounded protocol labels (CI execution pending).
-- [x] Add per-device communication diagnostics endpoint and tests (CI execution pending).
+- [x] Add per-device communication diagnostics and derived online/offline/unknown status endpoints with tests.
 - [ ] Verify counters remain race-free under concurrent poll/reload/shutdown.
 
 ## D. Point quality
