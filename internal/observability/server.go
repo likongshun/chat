@@ -133,6 +133,10 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_sum %f\\n", m.LatencyTotal.Seconds())
 		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_count summary")
 		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_count %d\\n", m.LatencyCount)
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_attempts_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_successes_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_failures_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_timeouts_total counter")
 		for _, protocol := range s.Communication.ProtocolSnapshots() {
 			fmt.Fprintf(w, "dcim_edge_protocol_poll_attempts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Attempts)
 			fmt.Fprintf(w, "dcim_edge_protocol_poll_successes_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Successes)
