@@ -30,7 +30,7 @@ func DecodeDataFormat(data []byte, format string) (any, error) {
 	case "HHMMSS":
 		return decodeDateDigits(data, 3, format)
 	}
-	if strings.ContainsAny(format, "XxNn") {
+	if isBCDFormat(format) {
 		return decodeBCDFormat(data, format)
 	}
 	if strings.HasPrefix(strings.ToUpper(format), "ASCII:") {
@@ -128,4 +128,30 @@ func decodeBCDFormat(data []byte, format string) (float64, error) {
 		n /= 10
 	}
 	return n, nil
+}
+
+
+// isBCDFormat accepts only BCD digit placeholders and one optional decimal
+// point. A loose ContainsAny check would incorrectly treat arbitrary words
+// such as "UNKNOWN" as a numeric format because they contain the letter N.
+func isBCDFormat(format string) bool {
+	if format == "" {
+		return false
+	}
+	dots := 0
+	digits := 0
+	for _, r := range format {
+		switch r {
+		case 'X', 'x', 'N', 'n':
+			digits++
+		case '.':
+			dots++
+			if dots > 1 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return digits > 0
 }
