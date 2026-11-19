@@ -48,13 +48,31 @@ type deviceCounters struct {
  lastErrorCode string
 }
 
+type protocolCounters struct {
+ attempts atomic.Uint64
+ successes atomic.Uint64
+ failures atomic.Uint64
+ timeouts atomic.Uint64
+ latencyTotal atomic.Uint64
+}
+
+type ProtocolCommunicationSnapshot struct {
+ Protocol string
+ Attempts uint64
+ Successes uint64
+ Failures uint64
+ Timeouts uint64
+ LatencyTotal time.Duration
+}
+
 type CommunicationStats struct {
  mu sync.RWMutex
  devices map[string]*deviceCounters
+ protocols map[string]*protocolCounters
 }
 
 func NewCommunicationStats() *CommunicationStats {
- return &CommunicationStats{devices:make(map[string]*deviceCounters)}
+ return &CommunicationStats{devices:make(map[string]*deviceCounters),protocols:make(map[string]*protocolCounters)}
 }
 
 func (s *CommunicationStats) counters(deviceID string) *deviceCounters {
@@ -162,4 +180,36 @@ func (s *CommunicationStats) FleetSnapshot() FleetCommunicationSnapshot {
   out.LatencyTotal+=time.Duration(c.latencyTotal.Load())
  }
  return out
+}
+
+func (s *CommunicationStats) RecordProtocol(protocol,deviceID string,at time.Time,latency time.Duration,errCode string,timeout,reconnect bool) {
+ if s==nil { return }
+ if protocol=="" { protocol=string(ProtocolModbusTCP) }
+ s.Record(deviceID,at,latency,errCode,timeout,reconnect)
+ s.mu.Lock()
+ p:=s.protocols[protocol]
+ if p==nil { p=&protocolCounters{};s.protocols[protocol]=p }
+ s.mu.Unlock()
+ p.attempts.Add(1)
+ p.latencyTotal.Add(uint64(maxDuration(latency,0)))
+ if errCode=="" { p.successes.Add(1) } else {
+  p.failures.Add(1)
+  if timeout { p.timeouts.Add(1) }
+ }
+}
+
+func (s *CommunicationStats) ProtocolSnapshots() []ProtocolCommunicationSnapshot {
+ if s==nil { return nil }
+ s.mu.RLock()
+ out:=make([]ProtocolCommunicationSnapshot,0,len(s.protocols))
+ for name,p:=range s.protocols {
+  out=append(out,ProtocolCommunicationSnapshot{Protocol:name,Attempts:p.attempts.Load(),Successes:p.successes.Load(),Failures:p.failures.Load(),Timeouts:p.timeouts.Load(),LatencyTotal:time.Duration(p.latencyTotal.Load())})
+ }
+ s.mu.RUnlock()
+ return out
+}
+
+func maxDuration(v,minimum time.Duration) time.Duration {
+ if v<minimum { return minimum }
+ return v
 }
