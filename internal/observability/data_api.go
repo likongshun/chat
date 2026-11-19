@@ -72,6 +72,7 @@ func (s *Server) registerDataAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/devices", s.listDevices)
 	mux.HandleFunc("/api/v1/devices/", s.devicePoints)
 	mux.HandleFunc("/api/v1/telemetry", s.queryTelemetry)
+	mux.HandleFunc("/api/v1/telemetry/aggregate", s.aggregateTelemetry)
 	mux.HandleFunc("/api/v1/dlt645/discover", s.discoverDLT645Meter)
 	mux.HandleFunc("/api/v1/dlt645/templates", s.listDLT645Templates)
 }
@@ -274,4 +275,114 @@ func writeJSON(w http.ResponseWriter,status int,value any) {
 	w.Header().Set("Cache-Control","no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+type aggregateResponse struct {
+ DeviceID string `json:"device_id"`
+ PointCode string `json:"point_id"`
+ From time.Time `json:"from"`
+ To time.Time `json:"to"`
+ Step string `json:"step"`
+ Function string `json:"function"`
+ QualityPolicy string `json:"quality_policy"`
+ Data []telemetryView `json:"data"`
+}
+
+func (s *Server) aggregateTelemetry(w http.ResponseWriter,r *http.Request) {
+ if r.Method!=http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
+ q:=r.URL.Query()
+ deviceID:=strings.TrimSpace(q.Get("device_id"))
+ pointCode:=strings.TrimSpace(q.Get("point_id"))
+ if deviceID==""||pointCode==""||len(deviceID)>128||len(pointCode)>128 { http.Error(w,"device_id and point_id are required",http.StatusBadRequest);return }
+ fn:=strings.ToLower(strings.TrimSpace(q.Get("fn")))
+ switch fn {
+ case "min","max","mean","count","last":
+ default: http.Error(w,"fn must be min, max, mean, count or last",http.StatusBadRequest);return
+ }
+ step,err:=time.ParseDuration(strings.TrimSpace(q.Get("step")))
+ if err!=nil||step<time.Second||step>24*time.Hour||step%time.Second!=0 { http.Error(w,"step must be a whole-second duration between 1s and 24h",http.StatusBadRequest);return }
+ from,err:=time.Parse(time.RFC3339,q.Get("from"))
+ if err!=nil { http.Error(w,"valid from RFC3339 timestamp is required",http.StatusBadRequest);return }
+ to,err:=time.Parse(time.RFC3339,q.Get("to"))
+ if err!=nil { http.Error(w,"valid to RFC3339 timestamp is required",http.StatusBadRequest);return }
+ now:=time.Now().UTC()
+ from, to = from.UTC(),to.UTC()
+ if !from.Before(to)||to.After(now.Add(5*time.Minute))||to.Sub(from)>7*24*time.Hour { http.Error(w,"time range must be positive, end near current time and no longer than 7 days",http.StatusBadRequest);return }
+ if int64(to.Sub(from)/step)>1000 { http.Error(w,"step produces more than 1000 buckets",http.StatusBadRequest);return }
+ cfg,pointsByModel,_:=s.configurationIndex()
+ if cfg==nil { http.Error(w,"configuration unavailable",http.StatusServiceUnavailable);return }
+ var model string
+ for _,d:=range cfg.Devices { if d.ID==deviceID { model=d.Model;break } }
+ if model=="" { http.Error(w,"unknown device or point",http.StatusNotFound);return }
+ var selected *config.Point
+ for i:=range pointsByModel[model] {
+  point:=&pointsByModel[model][i]
+  if point.PointCode==pointCode&&point.Enabled { selected=point;break }
+ }
+ if selected==nil { http.Error(w,"unknown device or point",http.StatusNotFound);return }
+ if (fn=="min"||fn=="max"||fn=="mean")&&!isNumericDataType(selected.DataType) {
+  http.Error(w,"min, max and mean require a numeric point",http.StatusBadRequest);return
+ }
+ if s.Influx==nil||s.Influx.Token=="" { http.Error(w,"historical data source is not configured",http.StatusServiceUnavailable);return }
+ data,err:=s.queryInfluxAggregate(r.Context(),deviceID,pointCode,from,to,step,fn)
+ if err!=nil { http.Error(w,"historical aggregate query failed",http.StatusBadGateway);return }
+ writeJSON(w,http.StatusOK,aggregateResponse{
+  DeviceID:deviceID,PointCode:pointCode,From:from,To:to,Step:step.String(),Function:fn,
+  QualityPolicy:"GOOD samples only; BAD, UNCERTAIN and STALE samples are excluded",
+  Data:data,
+ })
+}
+
+func isNumericDataType(dataType string) bool {
+ switch strings.ToUpper(strings.TrimSpace(dataType)) {
+ case "INT16","UINT16","INT32","UINT32","INT64","UINT64","FLOAT32","FLOAT64","BCD","BCD_SIGNED":
+  return true
+ default:
+  return false
+ }
+}
+
+func (s *Server) queryInfluxAggregate(ctx context.Context,deviceID,pointCode string,from,to time.Time,step time.Duration,fn string)([]telemetryView,error) {
+ if s.Influx==nil { return nil,fmt.Errorf("InfluxDB not configured") }
+ base,err:=url.Parse(strings.TrimRight(s.Influx.URL,"/")+"/api/v2/query")
+ if err!=nil { return nil,err }
+ q:=base.Query();q.Set("org",s.Influx.Org);base.RawQuery=q.Encode()
+ every:=strconv.FormatInt(int64(step/time.Second),10)+"s"
+ flux:=fmt.Sprintf("from(bucket: %s) |> range(start: time(v: %s), stop: time(v: %s)) |> filter(fn: (r) => r._measurement == \"modbus_point\" and r._field == \"value\" and r.device_id == %s and r.point_code == %s and r.quality == \"good\") |> aggregateWindow(every: %s, fn: %s, createEmpty: false) |> sort(columns: [\"_time\"])",strconv.Quote(s.Influx.Bucket),strconv.Quote(from.Format(time.RFC3339Nano)),strconv.Quote(to.Format(time.RFC3339Nano)),strconv.Quote(deviceID),strconv.Quote(pointCode),every,fn)
+ req,err:=http.NewRequestWithContext(ctx,http.MethodPost,base.String(),strings.NewReader(flux))
+ if err!=nil { return nil,err }
+ req.Header.Set("Authorization","Token "+s.Influx.Token)
+ req.Header.Set("Content-Type","application/vnd.flux")
+ req.Header.Set("Accept","application/csv")
+ client:=s.InfluxClient
+ if client==nil { client=&http.Client{Timeout:10*time.Second} }
+ resp,err:=client.Do(req)
+ if err!=nil { return nil,err }
+ defer resp.Body.Close()
+ if resp.StatusCode<200||resp.StatusCode>=300 {
+  _,_=io.Copy(io.Discard,io.LimitReader(resp.Body,4096))
+  return nil,fmt.Errorf("InfluxDB returned %s",resp.Status)
+ }
+ reader:=csv.NewReader(io.LimitReader(resp.Body,4<<20))
+ reader.FieldsPerRecord=-1
+ var headers,dataTypes []string
+ out:=make([]telemetryView,0)
+ for {
+  record,e:=reader.Read()
+  if e==io.EOF { break }
+  if e!=nil { return nil,e }
+  if len(record)==0 { continue }
+  if record[0]=="#datatype" { dataTypes=record;continue }
+  if strings.HasPrefix(record[0],"#") { continue }
+  if headers==nil { headers=record;continue }
+  row:=map[string]string{}
+  for i,v:=range record { if i<len(headers) { row[headers[i]]=v } }
+  ts,parseErr:=time.Parse(time.RFC3339Nano,row["_time"])
+  if parseErr!=nil { continue }
+  valueType:=""
+  for i,name:=range headers { if name=="_value"&&i<len(dataTypes) { valueType=dataTypes[i];break } }
+  out=append(out,telemetryView{DeviceID:deviceID,PointCode:pointCode,Timestamp:ts,Value:parseInfluxValue(row["_value"],valueType),Quality:"good"})
+  if len(out)>1000 { return nil,fmt.Errorf("aggregate response exceeded 1000 buckets") }
+ }
+ return out,nil
 }
