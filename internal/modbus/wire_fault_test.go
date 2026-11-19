@@ -38,6 +38,8 @@ func serveModbusReply(t *testing.T, reply func([]byte) []byte) string {
 		}
 		if response := reply(header[:]); response != nil {
 			_, _ = conn.Write(response)
+		} else {
+			_, _ = io.Copy(io.Discard, conn)
 		}
 	}()
 	return ln.Addr().String()
