@@ -131,3 +131,35 @@ func (s *CommunicationStats) DeviceCount() int {
  defer s.mu.RUnlock()
  return len(s.devices)
 }
+
+
+type FleetCommunicationSnapshot struct {
+ Devices int
+ Attempts uint64
+ Successes uint64
+ Failures uint64
+ Timeouts uint64
+ Reconnects uint64
+ LatencyCount uint64
+ LatencyTotal time.Duration
+}
+
+func (s *CommunicationStats) FleetSnapshot() FleetCommunicationSnapshot {
+ out:=FleetCommunicationSnapshot{}
+ if s==nil { return out }
+ s.mu.RLock()
+ devices:=make([]*deviceCounters,0,len(s.devices))
+ for _,c:=range s.devices { devices=append(devices,c) }
+ out.Devices=len(devices)
+ s.mu.RUnlock()
+ for _,c:=range devices {
+  out.Attempts+=c.attempts.Load()
+  out.Successes+=c.successes.Load()
+  out.Failures+=c.failures.Load()
+  out.Timeouts+=c.timeouts.Load()
+  out.Reconnects+=c.reconnects.Load()
+  out.LatencyCount+=c.latencyCount.Load()
+  out.LatencyTotal+=time.Duration(c.latencyTotal.Load())
+ }
+ return out
+}
