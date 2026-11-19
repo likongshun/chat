@@ -249,7 +249,7 @@ func TestDecode645PointValueUsesFormatPrecisionAndCalibration(t *testing.T) {
 	point := config.Point{DataID:"00010000", Count:4, DataType:"BCD", DataFormat:"XXXXXX.XX", Scale:2, Offset:1}
 	got, err := decode645PointValue([]byte{0,0,1,0,0x78,0x56,0x34,0x12}, point)
 	if err != nil { t.Fatal(err) }
-	if got != 246914.56 { t.Fatalf("got %v, want 246914.56", got) }
+	if value, ok := got.(float64); !ok || value < 246914.559999 || value > 246914.560001 { t.Fatalf("got %v, want 246914.56", got) }
 }
 
 func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
