@@ -157,6 +157,17 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 func (s *Server) devicePoints(w http.ResponseWriter,r *http.Request) {
 	if r.Method!=http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
 	id:=strings.TrimPrefix(r.URL.EscapedPath(),"/api/v1/devices/")
+	if strings.HasSuffix(id,"/communication") {
+		id=strings.TrimSuffix(id,"/communication")
+		id=strings.Trim(id,"/")
+		decodedID,err:=url.PathUnescape(id)
+		if err!=nil||decodedID=="" { http.NotFound(w,r);return }
+		if s.Communication==nil { http.Error(w,"communication statistics unavailable",http.StatusServiceUnavailable);return }
+		snapshot,ok:=s.Communication.Snapshot(decodedID)
+		if !ok { http.NotFound(w,r);return }
+		writeJSON(w,http.StatusOK,snapshot)
+		return
+	}
 	if !strings.HasSuffix(id,"/points") { http.NotFound(w,r);return }
 	id=strings.TrimSuffix(id,"/points")
 	id=strings.Trim(id,"/")
