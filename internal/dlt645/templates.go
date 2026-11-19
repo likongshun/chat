@@ -14,6 +14,7 @@ type DataIDTemplate struct {
 	Name string `json:"name"`
 	Category string `json:"category"`
 	DataType string `json:"data_type"`
+	DataFormat string `json:"data_format"`
 	Length uint16 `json:"length"`
 	Scale float64 `json:"scale"`
 	Unit string `json:"unit"`
@@ -21,16 +22,17 @@ type DataIDTemplate struct {
 }
 
 var standardDataIDTemplates = []DataIDTemplate{
+	{ID:"00000000",Name:"组合有功总电能",Category:"电能",DataType:"BCD",DataFormat:"XXXXXX.XX",Length:4,Scale:0.01,Unit:"kWh",Notes:"数据标识与倍率应以电表型号说明书为准"},
 	{ID:"00010000",Name:"正向有功总电能",Category:"电能",DataType:"BCD",Length:4,Scale:0.01,Unit:"kWh",Notes:"常见标准数据项；以电表说明书的精度和数据长度为准"},
 	{ID:"00020000",Name:"反向有功总电能",Category:"电能",DataType:"BCD",Length:4,Scale:0.01,Unit:"kWh",Notes:"常见标准数据项；以电表说明书的精度和数据长度为准"},
 	{ID:"00030000",Name:"正向无功总电能",Category:"电能",DataType:"BCD",Length:4,Scale:0.01,Unit:"kvarh",Notes:"常见标准数据项；以电表说明书的精度和数据长度为准"},
 	{ID:"00040000",Name:"反向无功总电能",Category:"电能",DataType:"BCD",Length:4,Scale:0.01,Unit:"kvarh",Notes:"常见标准数据项；以电表说明书的精度和数据长度为准"},
-	{ID:"02010100",Name:"A相电压",Category:"电压",DataType:"BCD",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
-	{ID:"02010200",Name:"B相电压",Category:"电压",DataType:"BCD",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
-	{ID:"02010300",Name:"C相电压",Category:"电压",DataType:"BCD",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
-	{ID:"02020100",Name:"A相电流",Category:"电流",DataType:"BCD",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
-	{ID:"02020200",Name:"B相电流",Category:"电流",DataType:"BCD",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
-	{ID:"02020300",Name:"C相电流",Category:"电流",DataType:"BCD",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02010100",Name:"A相电压",Category:"电压",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02010200",Name:"B相电压",Category:"电压",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02010300",Name:"C相电压",Category:"电压",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"V",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02020100",Name:"A相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02020200",Name:"B相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02020300",Name:"C相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
 }
 
 // ListDataIDTemplates returns a copy sorted by category and identifier.
