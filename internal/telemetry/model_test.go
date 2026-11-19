@@ -49,3 +49,12 @@ func TestCommunicationStatsConcurrent(t *testing.T) {
  if snapshot.Attempts!=2000 || snapshot.Successes!=2000 || snapshot.Failures!=0 { t.Fatalf("bad counters: %+v",snapshot) }
  if snapshot.LatencyCount!=snapshot.Attempts { t.Fatalf("latency count mismatch: %+v",snapshot) }
 }
+
+func TestProtocolCommunicationCounters(t *testing.T) {
+ stats:=NewCommunicationStats()
+ stats.RecordProtocol(string(ProtocolDLT645),"meter-1",time.Now(),150*time.Millisecond,"TIMEOUT",true,false)
+ snapshots:=stats.ProtocolSnapshots()
+ if len(snapshots)!=1 { t.Fatalf("protocol snapshots=%d",len(snapshots)) }
+ got:=snapshots[0]
+ if got.Protocol!=string(ProtocolDLT645)||got.Attempts!=1||got.Failures!=1||got.Timeouts!=1 { t.Fatalf("unexpected protocol counters: %+v",got) }
+}
