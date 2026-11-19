@@ -140,6 +140,13 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintf(w, "dcim_edge_protocol_poll_timeouts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Timeouts)
 		}
 	}
+	if s.Latest != nil {
+		counts := s.Latest.QualityCounts()
+		fmt.Fprintln(w, "# TYPE dcim_edge_points_by_quality gauge")
+		for _, quality := range []collector.Quality{collector.QualityGood, collector.QualityBad, collector.QualityCommError, collector.QualityUncertain, collector.QualityStale} {
+			fmt.Fprintf(w, "dcim_edge_points_by_quality{quality=%q} %d\\n", quality, counts[quality])
+		}
+	}
 	if s.WAL != nil {
 		stats, err := s.WAL.Stats()
 		if err == nil {
