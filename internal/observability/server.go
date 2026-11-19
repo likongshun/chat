@@ -129,10 +129,16 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "dcim_edge_communication_timeouts_total %d\\n", m.Timeouts)
 		fmt.Fprintln(w, "# TYPE dcim_edge_communication_reconnects_total counter")
 		fmt.Fprintf(w, "dcim_edge_communication_reconnects_total %d\\n", m.Reconnects)
-		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_sum counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_sum summary")
 		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_sum %f\\n", m.LatencyTotal.Seconds())
-		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_count counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_count summary")
 		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_count %d\\n", m.LatencyCount)
+		for _, protocol := range s.Communication.ProtocolSnapshots() {
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_attempts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Attempts)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_successes_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Successes)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_failures_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Failures)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_timeouts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Timeouts)
+		}
 	}
 	if s.WAL != nil {
 		stats, err := s.WAL.Stats()
