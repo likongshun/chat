@@ -45,3 +45,17 @@ func TestLatestStoreBadDecodePreservesLastValue(t *testing.T) {
  got,_:=store.Get("meter-1","voltage")
  if got.Value!=float64(230) || got.Quality!=QualityBad { t.Fatalf("bad sample overwrote last valid value: %+v",got) }
 }
+
+func TestLatestStoreQualityCounts(t *testing.T) {
+ store:=NewLatestStore(10)
+ now:=time.Now().UTC()
+ store.Update([]Sample{
+  {DeviceID:"d1",PointCode:"good",Value:1,Quality:QualityGood,Timestamp:now},
+  {DeviceID:"d1",PointCode:"bad",Quality:QualityBad,Error:"decode",Timestamp:now},
+  {DeviceID:"d1",PointCode:"uncertain",Value:2,Quality:QualityUncertain,Timestamp:now},
+ })
+ counts:=store.QualityCounts()
+ if counts[QualityGood]!=1 || counts[QualityBad]!=1 || counts[QualityUncertain]!=1 {
+  t.Fatalf("unexpected quality counts: %+v",counts)
+ }
+}
