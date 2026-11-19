@@ -30,7 +30,7 @@ func startDLT645TCPMeter(t *testing.T, corruptChecksum bool) (string, <-chan err
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 
-		request := make([]byte, 17)
+		request := make([]byte, 16)
 		if _, err := io.ReadFull(conn, request); err != nil {
 			result <- err
 			return
