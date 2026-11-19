@@ -44,7 +44,7 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Implement wire-level deterministic Modbus TCP simulator (the new CLI currently simulates the scheduler/router path).
 - [ ] Implement wire-level deterministic DL/T645 transport simulator including valid multi-frame and malformed-frame cases (the new CLI currently simulates the scheduler/router path).
 - [x] Add smoke, 100-device, 1,000-device and opt-in 5,000-device scheduler/router simulation profiles in cmd/loadtest; wire-level simulators remain pending.
-- [ ] Emit machine-readable benchmark summary with hardware/runtime/config parameters.
+- [x] Emit machine-readable JSON summary with runtime/config parameters; host/hardware details must be recorded alongside the run.
 - [ ] Measure throughput, latency percentiles, CPU, RSS, goroutines, FDs, queue depth, WAL backlog, ACK lag and quality distribution.
 - [ ] Run race tests and a multi-hour soak before any production capacity statement.
 
