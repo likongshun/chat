@@ -55,6 +55,6 @@ func TestDecodeCompositeMaximumDemand(t *testing.T) {
 	got, err := DecodeDataFormat([]byte{0x56,0x34,0x12,0x30,0x12,0x19,0x11,0x26}, "XXX.XXX+YYMMDDhhmm")
 	if err != nil { t.Fatal(err) }
 	value := got.(map[string]any)
-	if value["value"] != float64(123.456) { t.Fatalf("unexpected value: %#v",value["value"]) }
+	if gotValue, ok := value["value"].(float64); !ok || gotValue < 123.455999 || gotValue > 123.456001 { t.Fatalf("unexpected value: %#v",value["value"]) }
 	if value["occurred_at"] != "2611191230" { t.Fatalf("unexpected timestamp: %#v",value["occurred_at"]) }
 }
