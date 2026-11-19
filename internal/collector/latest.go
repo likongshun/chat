@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"sync"
 	"time"
+	"strings"
 )
 
 // LatestStore is a bounded in-memory view of the most recently observed point
@@ -46,7 +47,7 @@ func (s *LatestStore) Update(samples []Sample) {
 			previous:=s.items[key]
 			lastSuccess:=previous.LastSuccess
 			value:=sample.Value
-			reason:=sample.Error
+			reason:=qualityReasonCode(sample.Quality,sample.Error)
 			if sample.Quality==QualityCommError || sample.Quality==QualityBad || sample.Quality==QualityStale {
 				value=previous.Value
 			} else {
@@ -72,7 +73,7 @@ func (s *LatestStore) Update(samples []Sample) {
 		if sample.Quality==QualityGood || sample.Quality==QualityUncertain { lastSuccess=sample.Timestamp }
 		value:=sample.Value
 		if sample.Quality==QualityCommError || sample.Quality==QualityBad || sample.Quality==QualityStale { value=nil }
-		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,QualityReason:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
+		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,QualityReason:qualityReasonCode(sample.Quality,sample.Error),Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 		s.items[key]=latest
 		if s.byDevice[sample.DeviceID]==nil { s.byDevice[sample.DeviceID]=make(map[string]LatestSample) }
 		s.byDevice[sample.DeviceID][sample.PointCode]=latest
@@ -132,4 +133,30 @@ func (s *LatestStore) MarkStale(now time.Time,expectedIntervals map[string]time.
   changed++
  }
  return changed
+}
+
+func qualityReasonCode(quality Quality,detail string) string {
+ switch quality {
+ case QualityGood:
+  return ""
+ case QualityUncertain:
+  return "ESTIMATED_VALUE"
+ case QualityStale:
+  return "STALE_TIMEOUT"
+ }
+ message:=strings.ToLower(detail)
+ switch {
+ case strings.Contains(message,"timeout"),strings.Contains(message,"deadline"):
+  return "TIMEOUT"
+ case strings.Contains(message,"crc"),strings.Contains(message,"checksum"):
+  return "CRC_ERROR"
+ case strings.Contains(message,"decode"),strings.Contains(message,"bcd"):
+  return "DECODE_ERROR"
+ case strings.Contains(message,"range"):
+  return "OUT_OF_RANGE"
+ case strings.Contains(message,"meter returned"):
+  return "DEVICE_ERROR"
+ default:
+  return "PROTOCOL_ERROR"
+ }
 }
