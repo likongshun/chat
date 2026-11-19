@@ -19,6 +19,7 @@ import (
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/observability"
 	"github.com/likongshun/chat/internal/reliability/wal"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 func main() {
@@ -60,12 +61,14 @@ func main() {
 	dlt645Poller := &collector.DL645Poller{Config: *configManager.Current(), Latest: latestSamples, ConfigVersion: configVersion, Timeout: envDuration("DLT645_TIMEOUT", 1500*time.Millisecond)}
 	router := &collector.ProtocolRouter{Engines: map[string]collector.ProtocolPoller{"modbus-tcp": poller, "dl-t645-2007": dlt645Poller}}
 	collectorMetrics := &collector.Metrics{}
+	communicationStats := telemetry.NewCommunicationStats()
 	deliveryMetrics := &pipeline.DeliveryMetrics{}
 	engine := &collector.Engine{
 		Scheduler: collector.Scheduler{
 			Workers: envInt("POLL_WORKERS", 500),
 			OutputBuffer: envInt("SCHEDULER_OUTPUT_BUFFER", 10000),
 			Metrics: collectorMetrics,
+			DeviceStats: communicationStats,
 		},
 		Poller: poller,
 		Router: router,
@@ -82,6 +85,7 @@ func main() {
 		DLT645: dlt645Poller,
 		Influx: &observability.InfluxQueryOptions{URL: envString("INFLUXDB_URL", "http://influxdb:8086"), Org: envString("INFLUXDB_ORG", "modbus"), Bucket: envString("INFLUXDB_BUCKET", "telemetry"), Token: os.Getenv("INFLUXDB_TOKEN")},
 		Collector: collectorMetrics,
+		Communication: communicationStats,
 		WAL: store,
 		Delivery: deliveryMetrics,
 	}
