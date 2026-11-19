@@ -64,7 +64,7 @@ func startDLT645TCPMeter(t *testing.T, corruptChecksum bool) (string, <-chan err
 			result <- io.ErrUnexpectedEOF
 			return
 		}
-		last := append(append([]byte(nil), di...), 0x23, 0x01, 0x34)
+		last := append(append([]byte(nil), di...), 0x23, 0x01, 0x01)
 		if _, err := conn.Write(simulator645Frame("123456789012", 0x92, last)); err != nil {
 			result <- err
 			return
