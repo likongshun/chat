@@ -259,15 +259,11 @@ func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
 	if got != "123456" { t.Fatalf("got %#v, want time string", got) }
 
 	demandPoint := config.Point{DataID:"01010000", Count:8, DataType:"BCD", DataFormat:"XXX.XXX+YYMMDDhhmm", Scale:1}
-	payload := []byte{0,0,0,1,0,0,0,0}
-	// Three little-endian BCD bytes for 123.456 followed by five date/time bytes.
-	copy(payload[3:], []byte{0x56,0x34,0x12,0x26,0x11})
-	// Rebuild the DI prefix independently of the encoded field bytes.
-	wire := []byte{0,0,1,0,0x56,0x34,0x12,0x26,0x11}
+	wire := []byte{0,0,1,0,0x56,0x34,0x12,0x30,0x12,0x19,0x11,0x26}
 	got, err = decode645PointValue(wire, demandPoint)
 	if err != nil { t.Fatal(err) }
 	composite, ok := got.(map[string]any)
 	if !ok { t.Fatalf("got %T, want composite map", got) }
-	if composite["value"] != float64(123456) { t.Fatalf("unexpected demand value: %#v", composite) }
+	if composite["value"] != float64(123.456) { t.Fatalf("unexpected demand value: %#v", composite) }
 	if composite["occurred_at"] == nil { t.Fatal("missing demand occurrence time") }
 }
