@@ -31,6 +31,8 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Ensure non-finite numeric values cannot be GOOD.
 - [x] Add bounded latest quality counts and expose quality gauges; per-point diagnostics include quality reason.
 - [ ] Test timeout, malformed frame, CRC error, decode error, out-of-range, stale recovery and configuration changes.
+- [x] Expand the built-in DI catalog with demand, power, power-factor, phase-angle and meter date/time/rate parameter examples; templates explicitly flag composite demand/time payloads for dedicated decoding.
+- [x] Add format-driven BCD/date/time/ASCII decoding primitives with strict digit and calendar validation; end-to-end typed-value routing remains pending.
 
 ## E. Query and aggregation
 - [ ] Specify API request/response types and error envelope.
@@ -60,4 +62,5 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 
 ## Current state
 
-Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, runtime stale evaluator, last-value preservation, stable quality reason codes, quality count metrics, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, per-device communication diagnostics/status endpoints, first wire-level Modbus TCP/DL/T645 simulator tests, and persistent Modbus TCP reconnect event sourcing into device-level statistics have been added on the phase branch. Wire-level tests exercise real localhost TCP sockets; physical serial/PTY interoperability, historical quality-transition persistence, historical per-bucket quality counts, full sink/WAL soak, and target-hardware capacity measurements remain pending. No release-readiness claim is made.
+Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, runtime stale evaluator, last-value preservation, stable quality reason codes, quality count metrics, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, per-device communication diagnostics/status endpoints, first wire-level Modbus TCP/DL/T645 simulator tests, and persistent Modbus TCP reconnect event sourcing into device-level statistics, expanded DL/T645 DI templates, and format-driven BCD/date/time/ASCII decoder primitives have been added on the phase branch. Wire-level tests exercise real localhost TCP sockets; physical serial/PTY interoperability, historical quality-transition persistence, historical per-bucket quality counts, full sink/WAL soak, and target-hardware capacity measurements remain pending. No release-readiness claim is made.
+\n\n## DL/T645 reference\n\nThe DL/T645 extension uses the public Go implementation at https://github.com/600888/dlt645 as a capability and data-dictionary reference (Apache-2.0). Its layered separation of protocol, model, conversion and transport informed this work. The existing collector-owned frame parser and transport abstraction remain authoritative; upstream code is not vendored. Data identifier lengths, scale factors and manufacturer support must be verified against the actual meter model before deployment.\n
