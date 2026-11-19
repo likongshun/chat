@@ -157,8 +157,8 @@ func (c Config) Validate() error {
 			if p.DataID == "" {
 				return fmt.Errorf("point %s: DL/T645 data_id is required", key)
 			}
-			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" {
-				return fmt.Errorf("point %s: DL/T645 type must be BCD or BCD_SIGNED", key)
+			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" && !(strings.HasPrefix(strings.ToUpper(p.DataFormat), "ASCII:") && (p.DataType == "ASCII" || p.DataType == "STRING")) {
+				return fmt.Errorf("point %s: DL/T645 type must be BCD, BCD_SIGNED, or ASCII/STRING with ASCII data_format", key)
 			}
 			if p.Count < 1 || p.Count > 4096 {
 				return fmt.Errorf("point %s: DL/T645 data length must be 1..4096 bytes", key)
