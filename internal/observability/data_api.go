@@ -158,6 +158,14 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 func (s *Server) devicePoints(w http.ResponseWriter,r *http.Request) {
 	if r.Method!=http.MethodGet { http.Error(w,"method not allowed",http.StatusMethodNotAllowed);return }
 	id:=strings.TrimPrefix(r.URL.EscapedPath(),"/api/v1/devices/")
+	if strings.HasSuffix(id,"/status") {
+		id=strings.TrimSuffix(id,"/status")
+		id=strings.Trim(id,"/")
+		decodedID,err:=url.PathUnescape(id)
+		if err!=nil||decodedID=="" { http.NotFound(w,r);return }
+		s.deviceStatus(w,decodedID)
+		return
+	}
 	if strings.HasSuffix(id,"/communication") {
 		id=strings.TrimSuffix(id,"/communication")
 		id=strings.Trim(id,"/")
@@ -385,4 +393,37 @@ func (s *Server) queryInfluxAggregate(ctx context.Context,deviceID,pointCode str
   if len(out)>1000 { return nil,fmt.Errorf("aggregate response exceeded 1000 buckets") }
  }
  return out,nil
+}
+
+type deviceStatusView struct {
+ DeviceID string `json:"device_id"`
+ Enabled bool `json:"enabled"`
+ Protocol string `json:"protocol"`
+ Model string `json:"model"`
+ Status string `json:"status"`
+ LastSuccess *time.Time `json:"last_success,omitempty"`
+ PollIntervalMS int64 `json:"poll_interval_ms"`
+}
+
+func (s *Server) deviceStatus(w http.ResponseWriter,deviceID string) {
+ cfg:=s.currentConfig()
+ if cfg==nil { http.Error(w,"configuration unavailable",http.StatusServiceUnavailable);return }
+ var device *config.Device
+ for i:=range cfg.Devices { if cfg.Devices[i].ID==deviceID { device=&cfg.Devices[i];break } }
+ if device==nil { http.NotFound(w,nil);return }
+ view:=deviceStatusView{DeviceID:device.ID,Enabled:device.Enabled,Protocol:device.Protocol,Model:device.Model,Status:"unknown",PollIntervalMS:device.Interval.Milliseconds()}
+ if !device.Enabled { view.Status="disabled" } else {
+  var last time.Time
+  if s.Communication!=nil {
+   if stats,ok:=s.Communication.Snapshot(device.ID);ok { last=stats.LastSuccess }
+  }
+  if last.IsZero()&&s.Latest!=nil { last=s.Latest.LastSuccess(device.ID) }
+  if !last.IsZero() {
+   view.LastSuccess=&last
+   threshold:=device.Interval*3
+   if threshold<=0 { threshold=3*time.Second }
+   if time.Since(last)<=threshold { view.Status="online" } else { view.Status="offline" }
+  }
+ }
+ writeJSON(w,http.StatusOK,view)
 }
