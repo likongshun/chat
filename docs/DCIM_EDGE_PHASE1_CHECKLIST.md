@@ -9,18 +9,18 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Record existing WAL and configuration compatibility tests; no on-disk format changes without migration tests.
 
 ## B. Canonical model
-- [ ] Inventory existing config.Device, config.Point, collector sample/result, latest-store and WAL record types.
-- [ ] Define canonical protocol, quality and reason enums with stable serialized values.
-- [ ] Add adapters from existing config and poller results; avoid duplicating device configuration.
-- [ ] Add model contract tests for Modbus and DL/T645 samples.
+- [x] Inventory existing config.Device, config.Point, collector sample/result, latest-store and WAL record types.
+- [x] Define canonical protocol, quality and reason enums with stable serialized values.
+- [x] Add adapters from existing config and poller results; avoid duplicating device configuration.
+- [x] Add model and adapter contract tests for Modbus/DL-T645 sample shapes (CI execution pending).
 - [ ] Verify config-version provenance survives WAL replay and downstream delivery.
 
 ## C. Communication statistics
-- [ ] Extend atomic device counters for attempts, success, failure, timeout and reconnect.
-- [ ] Track last attempt/success/error and consecutive failures.
-- [ ] Add bounded latency histogram or fixed buckets.
-- [ ] Expose fleet/protocol counters with bounded Prometheus labels.
-- [ ] Add bounded device diagnostic endpoint and tests.
+- [x] Extend atomic device counters for attempts, success, failure, timeout and reconnect.
+- [x] Track last attempt/success/error and consecutive failures.
+- [x] Add fixed latency buckets and max/total latency counters.
+- [x] Expose fleet/protocol counters with bounded protocol labels (CI execution pending).
+- [x] Add per-device communication diagnostics endpoint and tests (CI execution pending).
 - [ ] Verify counters remain race-free under concurrent poll/reload/shutdown.
 
 ## D. Point quality
@@ -59,4 +59,4 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 
 ## Current state
 
-Architecture and acceptance contract have been documented. This checklist does not claim that the implementation items above are complete.
+Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, and the per-device communication diagnostics endpoint have been added on the phase branch. Automated CI execution and integration with persisted point-quality transitions remain pending; no release-readiness claim is made.
