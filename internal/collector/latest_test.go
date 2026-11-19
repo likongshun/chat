@@ -21,3 +21,27 @@ func TestLatestStoreBoundedAndRefreshesValues(t *testing.T) {
 	if _,ok:=store.Get("d1","p2");ok{t.Fatal("oldest point was not evicted")}
 	if got:=store.Snapshot("d2");len(got)!=1||got["p3"].Value!=float64(4){t.Fatalf("device snapshot=%+v",got)}
 }
+
+func TestLatestStoreMarksStaleWithoutLosingLastValue(t *testing.T) {
+ store:=NewLatestStore(10)
+ lastGood:=time.Now().UTC().Add(-3*time.Minute)
+ store.Update([]Sample{{DeviceID:"ups-1",PointCode:"battery_voltage",Value:float64(220.5),Quality:QualityGood,Timestamp:lastGood}})
+ store.Update([]Sample{{DeviceID:"ups-1",PointCode:"battery_voltage",Quality:QualityCommError,Error:"timeout",Timestamp:lastGood.Add(time.Minute)}})
+ key:=PointIntervalKey("ups-1","battery_voltage")
+ changed:=store.MarkStale(lastGood.Add(4*time.Minute),map[string]time.Duration{key:time.Minute},2)
+ if changed!=1 { t.Fatalf("stale transitions=%d",changed) }
+ got,ok:=store.Get("ups-1","battery_voltage")
+ if !ok { t.Fatal("missing latest point") }
+ if got.Quality!=QualityStale || got.QualityReason!="STALE_TIMEOUT" { t.Fatalf("unexpected quality: %+v",got) }
+ if got.Value!=float64(220.5) || !got.LastSuccess.Equal(lastGood) { t.Fatalf("last known value lost: %+v",got) }
+ if again:=store.MarkStale(lastGood.Add(5*time.Minute),map[string]time.Duration{key:time.Minute},2);again!=0 { t.Fatalf("stale transition repeated: %d",again) }
+}
+
+func TestLatestStoreBadDecodePreservesLastValue(t *testing.T) {
+ store:=NewLatestStore(10)
+ now:=time.Now().UTC()
+ store.Update([]Sample{{DeviceID:"meter-1",PointCode:"voltage",Value:float64(230),Quality:QualityGood,Timestamp:now}})
+ store.Update([]Sample{{DeviceID:"meter-1",PointCode:"voltage",Quality:QualityBad,Error:"invalid BCD",Timestamp:now.Add(time.Second)}})
+ got,_:=store.Get("meter-1","voltage")
+ if got.Value!=float64(230) || got.Quality!=QualityBad { t.Fatalf("bad sample overwrote last valid value: %+v",got) }
+}
