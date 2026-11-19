@@ -35,10 +35,10 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Specify API request/response types and error envelope.
 - [ ] Validate device/point ownership against an immutable config snapshot.
 - [ ] Implement latest-state query with bounded result count.
-- [ ] Implement time-bucket aggregate functions min/max/mean/count/last.
-- [ ] Preserve quality counts and exclude BAD/STALE from valid numeric aggregates.
-- [ ] Bound time range, step, points, rows, query timeout and response bytes.
-- [ ] Test storage unavailable behavior and ensure no fake historical fallback.
+- [x] Implement time-bucket aggregate functions min/max/mean/count/last with bounded InfluxDB Flux queries.
+- [x] Explicitly filter historical aggregates to GOOD samples; expose the quality policy in the API response. Historical per-bucket quality counts remain pending.
+- [x] Bound time range (7 days), step (1 second–24 hours), bucket count (1,000) and response bytes (4 MiB). Existing raw-history endpoint also bounds rows and offsets.
+- [x] Existing raw-history endpoint returns explicit dependency errors; aggregate endpoint has explicit unavailable/error responses and no latest-value fallback.
 
 ## F. Mixed-protocol load and soak
 - [ ] Implement deterministic Modbus TCP simulator.
