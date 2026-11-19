@@ -2,7 +2,6 @@ package collector
 
 import (
 	"context"
-	"encoding/binary"
 	"io"
 	"net"
 	"testing"
@@ -163,5 +162,4 @@ func TestSimulator645FrameLengthField(t *testing.T) {
 	if got := int(frame[9]); got != 3 {
 		t.Fatalf("DL/T645 length field=%d, want 3", got)
 	}
-	_ = binary.BigEndian
 }
