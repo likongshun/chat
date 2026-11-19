@@ -38,3 +38,23 @@ func TestDecodeDataFormatRejectsMalformedValues(t *testing.T) {
 		}
 	}
 }
+
+
+func TestValidateDataFormatLength(t *testing.T) {
+	for _, tt := range []struct{ format string; length uint16; wantErr bool }{
+		{"XXXXXX.XX",4,false}, {"XXX.X",2,false}, {"YYMMDDWW",4,false},
+		{"YYMMDDHHMM",5,false}, {"HHMMSS",3,false}, {"XXX.XXX+YYMMDDhhmm",8,false},
+		{"XXXXXX.XX",3,true}, {"UNKNOWN",1,true}, {"ASCII:3",2,true},
+	} {
+		err := ValidateDataFormat(tt.format, tt.length)
+		if (err != nil) != tt.wantErr { t.Errorf("ValidateDataFormat(%q,%d) error=%v",tt.format,tt.length,err) }
+	}
+}
+
+func TestDecodeCompositeMaximumDemand(t *testing.T) {
+	got, err := DecodeDataFormat([]byte{0x56,0x34,0x12,0x26,0x11,0x19,0x30,0x00}, "XXX.XXX+YYMMDDhhmm")
+	if err != nil { t.Fatal(err) }
+	value := got.(map[string]any)
+	if value["value"] != float64(123456) { t.Fatalf("unexpected value: %#v",value["value"]) }
+	if value["occurred_at"] != "0019301126" { t.Fatalf("unexpected timestamp: %#v",value["occurred_at"]) }
+}
