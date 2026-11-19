@@ -76,6 +76,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go monitorPointFreshness(ctx, configManager, latestSamples)
 
 	observabilityDone := make(chan error, 1)
 	observabilityServer := &observability.Server{
@@ -417,4 +418,31 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return value
+}
+
+func monitorPointFreshness(ctx context.Context, manager *config.Manager, latest *collector.LatestStore) {
+ ticker:=time.NewTicker(5*time.Second)
+ defer ticker.Stop()
+ evaluate:=func() {
+  cfg:=manager.Current()
+  if cfg==nil { return }
+  expected:=make(map[string]time.Duration)
+  for _,device:=range cfg.Devices {
+   if !device.Enabled || device.DiscoveryOnly || device.Interval<=0 { continue }
+   for _,point:=range cfg.Points {
+    if !point.Enabled { continue }
+    if point.Model==device.Model || point.DeviceID==device.ID {
+     expected[collector.PointIntervalKey(device.ID,point.PointCode)]=device.Interval
+    }
+   }
+  }
+  latest.MarkStale(time.Now().UTC(),expected,2)
+ }
+ evaluate()
+ for {
+  select {
+  case <-ctx.Done(): return
+  case <-ticker.C: evaluate()
+  }
+ }
 }
