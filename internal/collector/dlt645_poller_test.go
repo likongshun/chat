@@ -259,7 +259,7 @@ func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
 	if got != "123456" { t.Fatalf("got %#v, want time string", got) }
 
 	demandPoint := config.Point{DataID:"01010000", Count:8, DataType:"BCD", DataFormat:"XXX.XXX+YYMMDDhhmm", Scale:1}
-	wire := []byte{0,0,1,0,0x56,0x34,0x12,0x30,0x12,0x19,0x11,0x26}
+	wire := []byte{0,0,1,1,0x56,0x34,0x12,0x30,0x12,0x19,0x11,0x26}
 	got, err = decode645PointValue(wire, demandPoint)
 	if err != nil { t.Fatal(err) }
 	composite, ok := got.(map[string]any)
