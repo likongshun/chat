@@ -119,7 +119,7 @@ func (s *LatestStore) MarkStale(now time.Time,expectedIntervals map[string]time.
  s.mu.Lock()
  defer s.mu.Unlock()
  for key,current:=range s.items {
-  if current.Quality!=QualityGood&&current.Quality!=QualityUncertain { continue }
+  if current.Quality==QualityStale { continue }
   interval,ok:=expectedIntervals[key]
   if !ok||interval<=0||current.LastSuccess.IsZero() { continue }
   deadline:=time.Duration(float64(interval)*multiplier)
