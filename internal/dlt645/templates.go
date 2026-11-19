@@ -33,6 +33,20 @@ var standardDataIDTemplates = []DataIDTemplate{
 	{ID:"02020100",Name:"A相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
 	{ID:"02020200",Name:"B相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
 	{ID:"02020300",Name:"C相电流",Category:"电流",DataType:"BCD",DataFormat:"XX.XXX",Length:3,Scale:0.001,Unit:"A",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"01010000",Name:"正向有功总最大需量及发生时间",Category:"最大需量",DataType:"BCD",DataFormat:"XXX.XXX+YYMMDDhhmm",Length:8,Scale:0.001,Unit:"kW",Notes:"复合字段：需量值+发生时间；需按专用复合解码器处理"},
+	{ID:"01020000",Name:"反向有功总最大需量及发生时间",Category:"最大需量",DataType:"BCD",DataFormat:"XXX.XXX+YYMMDDhhmm",Length:8,Scale:0.001,Unit:"kW",Notes:"复合字段：需量值+发生时间；需按专用复合解码器处理"},
+	{ID:"02030100",Name:"总有功功率",Category:"功率",DataType:"BCD",DataFormat:"XXX.XXX",Length:3,Scale:0.001,Unit:"kW",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02050100",Name:"总无功功率",Category:"功率",DataType:"BCD",DataFormat:"XXX.XXX",Length:3,Scale:0.001,Unit:"kvar",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02040100",Name:"总功率因数",Category:"功率因数",DataType:"BCD",DataFormat:"X.XXX",Length:2,Scale:0.001,Unit:"",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02060100",Name:"A相功率因数",Category:"功率因数",DataType:"BCD",DataFormat:"X.XXX",Length:2,Scale:0.001,Unit:"",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02060200",Name:"B相功率因数",Category:"功率因数",DataType:"BCD",DataFormat:"X.XXX",Length:2,Scale:0.001,Unit:"",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02060300",Name:"C相功率因数",Category:"功率因数",DataType:"BCD",DataFormat:"X.XXX",Length:2,Scale:0.001,Unit:"",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02070100",Name:"A相相角",Category:"电气参数",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"°",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02070200",Name:"B相相角",Category:"电气参数",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"°",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"02070300",Name:"C相相角",Category:"电气参数",DataType:"BCD",DataFormat:"XXX.X",Length:2,Scale:0.1,Unit:"°",Notes:"常见标准数据项；请核对型号和小数位"},
+	{ID:"04000101",Name:"日期及星期",Category:"参变量",DataType:"BCD",DataFormat:"YYMMDDWW",Length:4,Scale:1,Unit:"",Notes:"星期字段0代表星期日"},
+	{ID:"04000102",Name:"时间",Category:"参变量",DataType:"BCD",DataFormat:"hhmmss",Length:3,Scale:1,Unit:"",Notes:"返回时分秒字符串"},
+	{ID:"04000204",Name:"费率数",Category:"参变量",DataType:"BCD",DataFormat:"NN",Length:1,Scale:1,Unit:"个",Notes:"具体支持范围以电表型号为准"},
 }
 
 // ListDataIDTemplates returns a copy sorted by category and identifier.
