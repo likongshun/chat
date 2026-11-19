@@ -213,3 +213,14 @@ func maxDuration(v,minimum time.Duration) time.Duration {
  if v<minimum { return minimum }
  return v
 }
+
+
+// RecordReconnect records a successful reconnection independently of poll
+// attempts. It is called by persistent protocol clients only after a new
+// transport connection has been established following an earlier connection.
+func (s *CommunicationStats) RecordReconnect(deviceID string) {
+	if s == nil || deviceID == "" {
+		return
+	}
+	s.counters(deviceID).reconnects.Add(1)
+}
