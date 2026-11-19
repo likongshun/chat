@@ -254,7 +254,7 @@ func TestDecode645PointValueUsesFormatPrecisionAndCalibration(t *testing.T) {
 
 func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
 	datePoint := config.Point{DataID:"04000102", Count:3, DataType:"BCD", DataFormat:"hhmmss", Scale:1}
-	got, err := decode645PointValue([]byte{0,0,1,4,0x56,0x34,0x12}, datePoint)
+	got, err := decode645PointValue([]byte{2,1,0,4,0x56,0x34,0x12}, datePoint)
 	if err != nil { t.Fatal(err) }
 	if got != "123456" { t.Fatalf("got %#v, want time string", got) }
 
