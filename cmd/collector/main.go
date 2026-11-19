@@ -426,7 +426,7 @@ func monitorPointFreshness(ctx context.Context, manager *config.Manager, latest 
  var cached *config.Config
  var expected map[string]time.Duration
  evaluate:=func() {
-  cfg:=manager.Current()
+  cfg:=manager.ReadOnly()
   if cfg==nil { return }
   if cfg!=cached {
    next:=make(map[string]time.Duration)
