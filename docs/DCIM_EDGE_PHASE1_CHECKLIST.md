@@ -24,11 +24,11 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Verify counters remain race-free under concurrent poll/reload/shutdown.
 
 ## D. Point quality
-- [ ] Normalize quality strings and reason codes.
-- [ ] Keep last value/last-good timestamp when a poll fails.
-- [ ] Implement stale evaluation from expected poll interval and configured multiplier.
+- [x] Normalize latest-point quality states and stable reason codes.
+- [x] Keep last value/last-success timestamp when a poll fails or decode fails.
+- [x] Implement stale evaluation from expected poll interval and configured multiplier; runtime monitor reevaluates on a 5-second cadence.
 - [ ] Ensure non-finite numeric values cannot be GOOD.
-- [ ] Add quality transition counters and point diagnostics.
+- [x] Add bounded latest quality counts and expose quality gauges; per-point diagnostics include quality reason.
 - [ ] Test timeout, malformed frame, CRC error, decode error, out-of-range, stale recovery and configuration changes.
 
 ## E. Query and aggregation
@@ -59,4 +59,4 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 
 ## Current state
 
-Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, and the per-device communication diagnostics endpoint have been added on the phase branch. Automated CI execution and integration with persisted point-quality transitions remain pending; no release-readiness claim is made.
+Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, runtime stale evaluator, last-value preservation, stable quality reason codes, quality count metrics, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, and the per-device communication diagnostics endpoint have been added on the phase branch. Automated CI validation is running; historical persistence of quality transitions and aggregate historical query APIs remain pending. No release-readiness claim is made.
