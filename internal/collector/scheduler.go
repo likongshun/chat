@@ -189,7 +189,8 @@ func (s Scheduler) Poll(ctx context.Context, devices []config.Device, fn func(co
 
 func communicationErrorCode(err error) (string, bool) {
  if err==nil { return "",false }
- if errors.Is(err,context.DeadlineExceeded) || errors.Is(err,context.Canceled) { return "TIMEOUT",true }
+ if errors.Is(err,context.DeadlineExceeded) { return "TIMEOUT",true }
+ if errors.Is(err,context.Canceled) { return "CANCELED",false }
  var netErr net.Error
  if errors.As(err,&netErr) && netErr.Timeout() { return "TIMEOUT",true }
  message:=strings.ToLower(err.Error())
