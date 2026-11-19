@@ -20,6 +20,16 @@ func DecodeDataFormat(data []byte, format string) (any, error) {
 	if len(data) == 0 || format == "" {
 		return nil, fmt.Errorf("empty DL/T645 data or format")
 	}
+	if strings.Contains(format, "+") {
+		parts := strings.Split(format, "+")
+		if len(parts) != 2 || len(data) < 1 { return nil, fmt.Errorf("invalid composite DL/T645 format %q", format) }
+		valueBytes := len(parts[0]) / 2
+		if strings.Count(parts[0], ".") > 0 { valueBytes = (len(strings.ReplaceAll(parts[0], ".", "")) + 1) / 2 }
+		if valueBytes <= 0 || valueBytes >= len(data) { return nil, fmt.Errorf("invalid composite field lengths for %q", format) }
+		value, err := decodeBCDFormat(data[:valueBytes], parts[0]); if err != nil { return nil, err }
+		occurred, err := DecodeDataFormat(data[valueBytes:], parts[1]); if err != nil { return nil, err }
+		return map[string]any{"value": value, "occurred_at": occurred}, nil
+	}
 	switch strings.ToUpper(format) {
 	case "YYMMDDWW":
 		return decodeDateDigits(data, 4, format)
@@ -154,4 +164,44 @@ func isBCDFormat(format string) bool {
 		}
 	}
 	return digits > 0
+}
+
+
+// ValidateDataFormat checks a format against its configured byte length before
+// a configuration snapshot can become active.
+func ValidateDataFormat(format string, length uint16) error {
+	format = strings.TrimSpace(format)
+	if format == "" || length == 0 { return fmt.Errorf("format and positive length are required") }
+	upper := strings.ToUpper(format)
+	switch upper {
+	case "YYMMDDWW", "MMDDHHMM":
+		if length != 4 { return fmt.Errorf("%s requires 4 bytes", format) }; return nil
+	case "YYMMDDHHMM":
+		if length != 5 { return fmt.Errorf("%s requires 5 bytes", format) }; return nil
+	case "HHMMSS":
+		if length != 3 { return fmt.Errorf("%s requires 3 bytes", format) }; return nil
+	}
+	if strings.HasPrefix(upper, "ASCII:") {
+		n, err := strconv.Atoi(strings.TrimPrefix(upper, "ASCII:"))
+		if err != nil || n != int(length) { return fmt.Errorf("ASCII format length must equal point length %d", length) }
+		return nil
+	}
+	if strings.Contains(format, "+") {
+		parts := strings.Split(format, "+")
+		if len(parts) != 2 { return fmt.Errorf("composite format must contain one '+'") }
+		if err := validateBCDPattern(parts[0]); err != nil { return err }
+		dateBytes := 0
+		switch strings.ToUpper(parts[1]) { case "YYMMDDHHMM": dateBytes=5; case "MMDDHHMM": dateBytes=4; default: return fmt.Errorf("unsupported composite suffix %q", parts[1]) }
+		valueBytes := (len(strings.ReplaceAll(parts[0], ".", "")) + 1) / 2
+		if valueBytes+dateBytes != int(length) { return fmt.Errorf("composite format requires %d bytes, got %d", valueBytes+dateBytes, length) }
+		return nil
+	}
+	if err := validateBCDPattern(format); err != nil { return err }
+	if (len(strings.ReplaceAll(format, ".", ""))+1)/2 != int(length) { return fmt.Errorf("BCD format requires %d bytes, got %d", (len(strings.ReplaceAll(format, ".", ""))+1)/2, length) }
+	return nil
+}
+
+func validateBCDPattern(format string) error {
+	if !isBCDFormat(format) { return fmt.Errorf("unsupported format %q", format) }
+	return nil
 }
