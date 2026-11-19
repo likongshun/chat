@@ -183,9 +183,11 @@ func (c Config) Validate() error {
 		}
 		width, ok := registerWidths[p.DataType]
 		if !ok {
-			if p.DataType == "STRING" {
-				if p.Count < 1 || p.Count > 120 {
-					return fmt.Errorf("point %s: STRING count must be 1..120 registers", key)
+			if p.DataType == "STRING" || (p.DataType == "ASCII" && isDLT645 && strings.HasPrefix(strings.ToUpper(p.DataFormat), "ASCII:")) {
+				maxCount := uint16(120)
+				if p.DataType == "ASCII" { maxCount = 4096 }
+				if p.Count < 1 || p.Count > maxCount {
+					return fmt.Errorf("point %s: %s count must be 1..%d", key, p.DataType, maxCount)
 				}
 			} else {
 				return fmt.Errorf("point %s: unsupported data type %q", key, p.DataType)
