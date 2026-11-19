@@ -52,16 +52,17 @@ func main() {
 	}
 
 	latestSamples := collector.NewLatestStore(envInt("LATEST_CACHE_MAX_POINTS", 1500000))
+	communicationStats := telemetry.NewCommunicationStats()
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
 		Latest: latestSamples,
 		ConfigVersion: configVersion,
+		Communication: communicationStats,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
 	dlt645Poller := &collector.DL645Poller{Config: *configManager.Current(), Latest: latestSamples, ConfigVersion: configVersion, Timeout: envDuration("DLT645_TIMEOUT", 1500*time.Millisecond)}
 	router := &collector.ProtocolRouter{Engines: map[string]collector.ProtocolPoller{"modbus-tcp": poller, "dl-t645-2007": dlt645Poller}}
 	collectorMetrics := &collector.Metrics{}
-	communicationStats := telemetry.NewCommunicationStats()
 	deliveryMetrics := &pipeline.DeliveryMetrics{}
 	engine := &collector.Engine{
 		Scheduler: collector.Scheduler{
