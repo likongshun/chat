@@ -16,11 +16,12 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [ ] Verify config-version provenance survives WAL replay and downstream delivery.
 
 ## C. Communication statistics
-- [x] Extend atomic device counters for attempts, success, failure, timeout and reconnect fields; reconnect event sourcing from persistent protocol clients remains a follow-up.
+- [x] Extend atomic device counters for attempts, success, failure, timeout and reconnect fields; persistent Modbus TCP client now emits reconnect events only after a previously connected client successfully redials, wired into per-device fleet statistics.
 - [x] Track last attempt/success/error and consecutive failures.
 - [x] Add fixed latency buckets and max/total latency counters.
 - [x] Expose fleet/protocol counters with bounded protocol labels (CI execution pending).
 - [x] Add per-device communication diagnostics and derived online/offline/unknown status endpoints with tests.
+- [x] Add focused tests for reconnect callback semantics and reconnect counters remaining independent of poll-attempt counts.
 - [ ] Verify counters remain race-free under concurrent poll/reload/shutdown.
 
 ## D. Point quality
@@ -59,4 +60,4 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 
 ## Current state
 
-Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, runtime stale evaluator, last-value preservation, stable quality reason codes, quality count metrics, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, per-device communication diagnostics/status endpoints, and first wire-level Modbus TCP/DL/T645 simulator tests have been added on the phase branch. Wire-level tests exercise real localhost TCP sockets; physical serial/PTY interoperability, reconnect event sourcing, historical quality-transition persistence, historical per-bucket quality counts, full sink/WAL soak, and target-hardware capacity measurements remain pending. No release-readiness claim is made.
+Architecture, canonical telemetry types, legacy adapters, quality/staleness primitives, runtime stale evaluator, last-value preservation, stable quality reason codes, quality count metrics, atomic per-device/protocol communication counters, scheduler instrumentation, fleet Prometheus metrics, per-device communication diagnostics/status endpoints, first wire-level Modbus TCP/DL/T645 simulator tests, and persistent Modbus TCP reconnect event sourcing into device-level statistics have been added on the phase branch. Wire-level tests exercise real localhost TCP sockets; physical serial/PTY interoperability, historical quality-transition persistence, historical per-bucket quality counts, full sink/WAL soak, and target-hardware capacity measurements remain pending. No release-readiness claim is made.
