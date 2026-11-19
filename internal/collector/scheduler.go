@@ -120,7 +120,7 @@ func (s Scheduler) runDevice(ctx context.Context, limit chan struct{}, out chan<
 		s.Metrics.record(result)
 		if s.DeviceStats != nil {
 			code, timeout := communicationErrorCode(err)
-			s.DeviceStats.Record(d.ID, finished, result.Duration, code, timeout, false)
+			s.DeviceStats.RecordProtocol(d.Protocol, d.ID, finished, result.Duration, code, timeout, false)
 		}
 		select {
 		case out <- result:
