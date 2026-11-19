@@ -423,18 +423,24 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 func monitorPointFreshness(ctx context.Context, manager *config.Manager, latest *collector.LatestStore) {
  ticker:=time.NewTicker(5*time.Second)
  defer ticker.Stop()
+ var cached *config.Config
+ var expected map[string]time.Duration
  evaluate:=func() {
   cfg:=manager.Current()
   if cfg==nil { return }
-  expected:=make(map[string]time.Duration)
-  for _,device:=range cfg.Devices {
-   if !device.Enabled || device.DiscoveryOnly || device.Interval<=0 { continue }
-   for _,point:=range cfg.Points {
-    if !point.Enabled { continue }
-    if point.Model==device.Model || point.DeviceID==device.ID {
-     expected[collector.PointIntervalKey(device.ID,point.PointCode)]=device.Interval
+  if cfg!=cached {
+   next:=make(map[string]time.Duration)
+   for _,device:=range cfg.Devices {
+    if !device.Enabled || device.DiscoveryOnly || device.Interval<=0 { continue }
+    for _,point:=range cfg.Points {
+     if !point.Enabled { continue }
+     if point.Model==device.Model || point.DeviceID==device.ID {
+      next[collector.PointIntervalKey(device.ID,point.PointCode)]=device.Interval
+     }
     }
    }
+   cached=cfg
+   expected=next
   }
   latest.MarkStale(time.Now().UTC(),expected,2)
  }
