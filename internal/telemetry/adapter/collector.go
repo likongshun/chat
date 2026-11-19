@@ -42,7 +42,7 @@ func SampleFromCollector(s collector.Sample) telemetry.Sample {
   out.Quality=telemetry.QualityGood
  case "bad":
   out.Quality=telemetry.QualityBad
-  out.Reason=telemetry.ReasonDecodeError
+  out.Reason=reasonFromError(s.Error)
  case "communication_error":
   out.Quality=telemetry.QualityBad
   out.Reason=reasonFromError(s.Error)
