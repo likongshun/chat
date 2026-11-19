@@ -137,7 +137,7 @@ func readPoints(f *excelize.File, devices []Device) ([]Point, error) {
 		if !isDLT645 && uint64(addr)+uint64(count) > 65536 { return nil, rowErr("Points", i, fmt.Errorf("address range exceeds 65535")) }
 		out = append(out, Point{
 			ID: model + "/" + code, Model: model, PointCode: code, DataID: strings.ToUpper(value(r, cols, "data_id")), Name: value(r, cols, "name"),
-			Address: uint16(addr), Count: uint16(count), Function: byte(fn), DataType: dtype,
+			Address: uint16(addr), Count: uint16(count), Function: byte(fn), DataType: dtype, DataFormat: value(r, cols, "data_format"),
 			Scale: scale, Offset: offset, ByteOrder: strings.ToUpper(value(r, cols, "byte_order")),
 			WordOrder: strings.ToUpper(value(r, cols, "word_order")), Unit: value(r, cols, "unit"),
 			ReadGroup: value(r, cols, "read_group"), Enabled: enabled, Writable: rw == "RW",
