@@ -14,6 +14,7 @@ import (
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/reliability/wal"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 type Server struct {
@@ -24,6 +25,7 @@ type Server struct {
 	Influx    *InfluxQueryOptions
 	InfluxClient *http.Client
 	Collector *collector.Metrics
+	Communication *telemetry.CommunicationStats
 	WAL       *wal.WAL
 	Delivery  *pipeline.DeliveryMetrics
 
@@ -112,6 +114,25 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprintln(w, "# TYPE modbus_collector_last_poll_timestamp_seconds gauge")
 			fmt.Fprintf(w, "modbus_collector_last_poll_timestamp_seconds %d\n", m.LastPoll.Unix())
 		}
+	}
+	if s.Communication != nil {
+		m := s.Communication.FleetSnapshot()
+		fmt.Fprintln(w, "# TYPE dcim_edge_devices_tracked gauge")
+		fmt.Fprintf(w, "dcim_edge_devices_tracked %d\\n", m.Devices)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_attempts_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_attempts_total %d\\n", m.Attempts)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_successes_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_successes_total %d\\n", m.Successes)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_failures_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_failures_total %d\\n", m.Failures)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_timeouts_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_timeouts_total %d\\n", m.Timeouts)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_reconnects_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_reconnects_total %d\\n", m.Reconnects)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_sum counter")
+		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_sum %f\\n", m.LatencyTotal.Seconds())
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_count counter")
+		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_count %d\\n", m.LatencyCount)
 	}
 	if s.WAL != nil {
 		stats, err := s.WAL.Stats()
