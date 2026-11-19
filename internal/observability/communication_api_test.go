@@ -25,3 +25,17 @@ func TestDeviceCommunicationDiagnosticsAPI(t *testing.T) {
  server.Handler().ServeHTTP(missing,httptest.NewRequest(http.MethodGet,"/api/v1/devices/missing/communication",nil))
  if missing.Code!=http.StatusNotFound { t.Fatalf("missing device status=%d",missing.Code) }
 }
+
+func TestDeviceStatusAPI(t *testing.T) {
+ server,_:=testDataServer(t)
+ server.Communication=telemetry.NewCommunicationStats()
+ server.Communication.Record("meter-1",time.Now(),10*time.Millisecond,"",false,false)
+ response:=httptest.NewRecorder()
+ server.Handler().ServeHTTP(response,httptest.NewRequest(http.MethodGet,"/api/v1/devices/meter-1/status",nil))
+ if response.Code!=http.StatusOK||!strings.Contains(response.Body.String(),"\"status\":\"online\"") {
+  t.Fatalf("device status response %d: %s",response.Code,response.Body.String())
+ }
+ missing:=httptest.NewRecorder()
+ server.Handler().ServeHTTP(missing,httptest.NewRequest(http.MethodGet,"/api/v1/devices/missing/status",nil))
+ if missing.Code!=http.StatusNotFound { t.Fatalf("missing device status=%d",missing.Code) }
+}
