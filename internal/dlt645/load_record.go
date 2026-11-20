@@ -1,7 +1,9 @@
 package dlt645
 
 import (
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -60,9 +62,9 @@ func EncodeReadLoadRecord(address, dataID string, blocks uint8, start *time.Time
 
 func decodeDataIdentifier(dataID string) ([4]byte, error) {
 	var out [4]byte
-	id, err := hexDecodeDataID(dataID)
-	if err != nil {
-		return out, err
+	id, err := hex.DecodeString(strings.TrimSpace(dataID))
+	if err != nil || len(id) != 4 {
+		return out, fmt.Errorf("data identifier must be 8 hexadecimal digits: %w", ErrFrame)
 	}
 	for i := range id {
 		out[i] = id[3-i]
