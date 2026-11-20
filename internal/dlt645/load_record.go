@@ -67,6 +67,9 @@ func EncodeReadLoadRecord(address, dataID string, blocks uint8, start *time.Time
 			bcdByte(start.Year()%100),
 		)
 	}
+	for i := range payload {
+		payload[i] += 0x33
+	}
 	return encodeFrame(addr, ReadData, payload), nil
 }
 
