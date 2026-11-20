@@ -9,11 +9,12 @@ import (
 
 // EncodeReadLoadRecord builds a DL/T645-2007 0x11 load-profile request.
 //
-// With start == nil, the request asks for the newest blocks:
+// With start == nil, the request uses the A.7 mode encoded by DI0 and asks
+// for the requested number of blocks:
 //   DI0..DI3, N
 //
-// With start != nil, the request asks for blocks beginning at the supplied
-// meter-local timestamp:
+// With start != nil, DI0 must select the given-time record form and the
+// request asks for blocks beginning at the supplied meter-local timestamp:
 //   DI0..DI3, N, mm, hh, DD, MM, YY
 //
 // The timestamp's wall-clock fields are used as meter-local time; no timezone
@@ -37,6 +38,9 @@ func EncodeReadLoadRecord(address, dataID string, blocks uint8, start *time.Time
 	// given-time, latest). Reject ordinary measurement DIs here.
 	if id[3] != 0x06 || id[1] != 0x00 || id[2] > 0x06 || id[0] > 0x02 {
 		return nil, fmt.Errorf("data identifier %q is not a DL/T645-2007 Appendix A.7 load-record DI: %w", dataID, ErrFrame)
+	}
+	if (start == nil && id[0] == 0x01) || (start != nil && id[0] != 0x01) {
+		return nil, fmt.Errorf("load-record DI %q and start-time argument do not select the same A.7 request form: %w", dataID, ErrFrame)
 	}
 	payload := make([]byte, 0, 10)
 	payload = append(payload, id[:]...)
