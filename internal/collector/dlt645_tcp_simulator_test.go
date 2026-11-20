@@ -178,7 +178,7 @@ func TestDLT645LoadRecordContinuationOverRealTCP(t *testing.T) {
 		if err != nil { serverDone <- err; return }
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(2*time.Second))
-		request := make([]byte, 17)
+		request := make([]byte, 22) // 12-byte framing overhead + 10-byte request data field
 		if _, err := io.ReadFull(conn, request); err != nil { serverDone <- err; return }
 		if request[8] != 0x11 || request[9] != 0x0a {
 			serverDone <- fmt.Errorf("unexpected load-record request: %x", request)
