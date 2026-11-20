@@ -4,7 +4,7 @@
 
 The collector now has a protocol-layer encoder for the standard 0x11 load-record read forms. This is deliberately separate from ordinary single-DI point reads.
 
-The standard request data field is:
+Appendix A.7 identifies load-record DIs with DI3=06H, DI2=record class (00H..06H), DI1=00H and DI0=00H (earliest), 01H (given time) or 02H (recent). The encoder rejects non-A.7 identifiers and mismatches between DI0 and the optional start timestamp. Select the class and mode supported by the exact meter model.\n\nThe standard request data field is:
 
 - Block-count form: `DI0 DI1 DI2 DI3 N` (L=05H).
 - Time-and-block-count form: `DI0 DI1 DI2 DI3 N mm hh DD MM YY` (L=0AH).
@@ -14,12 +14,12 @@ All data-field bytes are transmitted with the DL/T645 +0x33 transform. DI is sen
 Example API:
 
 ```go
-// Read the newest 12 load-record blocks.
-request, err := dlt645.EncodeReadLoadRecord(address, "04000001", 12, nil)
+// Read 12 recent blocks from load-record class 1 (A.7 DI0=02).
+request, err := dlt645.EncodeReadLoadRecord(address, "06010002", 12, nil)
 
 // Read 12 blocks beginning at the meter-local timestamp.
 start := time.Date(2026, 11, 20, 13, 15, 0, 0, meterLocation)
-request, err := dlt645.EncodeReadLoadRecord(address, "04000001", 12, &start)
+request, err := dlt645.EncodeReadLoadRecord(address, "06010001", 12, &start)
 ```
 
 ## Response and continuation
