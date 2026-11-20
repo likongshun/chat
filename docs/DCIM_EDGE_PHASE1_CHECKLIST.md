@@ -37,6 +37,7 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [x] Add composite maximum-demand decoding into numeric value plus occurrence timestamp.
 - [x] Separate decimal precision in data_format from the optional calibration multiplier/offset; standard templates use scale=1 when precision is already encoded in the format.
 - [x] Add DL/T645-2007 Appendix A.6 scheduled-freeze DI templates for previous scheduled-freeze timestamp, forward active energy and forward/reverse maximum demand with occurrence time; keep meter freeze-mode/model compatibility explicitly documented.
+- [x] Add and test DL/T645-2007 0x11 load-record request encoding for block-count and meter-local start-time + block-count forms; document the 0x12 continuation exchange and keep record-layout decoding as a model-specific follow-up.
 
 ## E. Query and aggregation
 - [ ] Specify API request/response types and error envelope.
