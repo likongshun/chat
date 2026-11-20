@@ -40,6 +40,26 @@ func TestDecodeDataFormatRejectsMalformedValues(t *testing.T) {
 }
 
 
+func TestDecodeScheduledFreezeDemand(t *testing.T) {
+	// DI payload bytes have already had the protocol's 0x33 offset removed.
+	// The six BCD digits are little-endian; the following five bytes encode
+	// YYMMDDhhmm in the same low-byte-first order.
+	got, err := DecodeDataFormat([]byte{0x34, 0x12, 0x00, 0x30, 0x12, 0x19, 0x11, 0x26}, "XX.XXXX+YYMMDDHHMM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("got %T, want composite map", got)
+	}
+	if n, ok := value["value"].(float64); !ok || n < 0.123399 || n > 0.123401 {
+		t.Fatalf("unexpected frozen demand value: %#v", value["value"])
+	}
+	if value["occurred_at"] != "2611191230" {
+		t.Fatalf("unexpected frozen demand timestamp: %#v", value["occurred_at"])
+	}
+}
+
 func TestValidateDataFormatLength(t *testing.T) {
 	for _, tt := range []struct{ format string; length uint16; wantErr bool }{
 		{"XXXXXX.XX",4,false}, {"XXX.X",2,false}, {"YYMMDDWW",4,false},
