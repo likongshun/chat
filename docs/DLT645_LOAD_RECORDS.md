@@ -4,7 +4,9 @@
 
 The collector now has a protocol-layer encoder for the standard 0x11 load-record read forms. This is deliberately separate from ordinary single-DI point reads.
 
-Appendix A.7 identifies load-record DIs with DI3=06H, DI2=record class (00H..06H), DI1=00H and DI0=00H (earliest), 01H (given time) or 02H (recent). The encoder rejects non-A.7 identifiers and mismatches between DI0 and the optional start timestamp. Select the class and mode supported by the exact meter model.\n\nThe standard request data field is:
+Appendix A.7 identifies load-record DIs with DI3=06H, DI2=record class (00H..06H), DI1=00H and DI0=00H (earliest), 01H (given time) or 02H (recent). The encoder rejects non-A.7 identifiers and mismatches between DI0 and the optional start timestamp. Select the class and mode supported by the exact meter model.
+
+The standard request data field is:
 
 - Block-count form: `DI0 DI1 DI2 DI3 N` (L=05H).
 - Time-and-block-count form: `DI0 DI1 DI2 DI3 N mm hh DD MM YY` (L=0AH).
