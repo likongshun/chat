@@ -32,6 +32,12 @@ func EncodeReadLoadRecord(address, dataID string, blocks uint8, start *time.Time
 	if err != nil {
 		return nil, err
 	}
+	// Appendix A.7 load-record identifiers use DI3=06H, DI1=00H,
+	// DI2=00H..06H (record class), and DI0=00H..02H (earliest,
+	// given-time, latest). Reject ordinary measurement DIs here.
+	if id[3] != 0x06 || id[1] != 0x00 || id[2] > 0x06 || id[0] > 0x02 {
+		return nil, fmt.Errorf("data identifier %q is not a DL/T645-2007 Appendix A.7 load-record DI: %w", dataID, ErrFrame)
+	}
 	payload := make([]byte, 0, 10)
 	payload = append(payload, id[:]...)
 	payload = append(payload, blocks)
