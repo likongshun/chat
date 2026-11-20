@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/likongshun/chat/internal/dlt645"
 )
 
 type Device struct {
@@ -39,6 +41,7 @@ type Point struct {
 	Count     uint16
 	Function  byte
 	DataType  string
+	DataFormat string
 	Scale     float64
 	Offset    float64
 	ByteOrder string
@@ -154,12 +157,13 @@ func (c Config) Validate() error {
 			if p.DataID == "" {
 				return fmt.Errorf("point %s: DL/T645 data_id is required", key)
 			}
-			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" {
-				return fmt.Errorf("point %s: DL/T645 type must be BCD or BCD_SIGNED", key)
+			if p.DataType != "BCD" && p.DataType != "BCD_SIGNED" && !(strings.HasPrefix(strings.ToUpper(p.DataFormat), "ASCII:") && (p.DataType == "ASCII" || p.DataType == "STRING")) {
+				return fmt.Errorf("point %s: DL/T645 type must be BCD, BCD_SIGNED, or ASCII/STRING with ASCII data_format", key)
 			}
 			if p.Count < 1 || p.Count > 4096 {
 				return fmt.Errorf("point %s: DL/T645 data length must be 1..4096 bytes", key)
 			}
+			if p.DataFormat != "" { if err := dlt645.ValidateDataFormat(p.DataFormat, p.Count); err != nil { return fmt.Errorf("point %s: invalid DL/T645 data_format: %w", key, err) } }
 		} else {
 			if p.Function < 1 || p.Function > 4 {
 				return fmt.Errorf("point %s: read function must be FC01..FC04", key)
@@ -179,9 +183,11 @@ func (c Config) Validate() error {
 		}
 		width, ok := registerWidths[p.DataType]
 		if !ok {
-			if p.DataType == "STRING" {
-				if p.Count < 1 || p.Count > 120 {
-					return fmt.Errorf("point %s: STRING count must be 1..120 registers", key)
+			if p.DataType == "STRING" || (p.DataType == "ASCII" && isDLT645 && strings.HasPrefix(strings.ToUpper(p.DataFormat), "ASCII:")) {
+				maxCount := uint16(120)
+				if p.DataType == "ASCII" { maxCount = 4096 }
+				if p.Count < 1 || p.Count > maxCount {
+					return fmt.Errorf("point %s: %s count must be 1..%d", key, p.DataType, maxCount)
 				}
 			} else {
 				return fmt.Errorf("point %s: unsupported data type %q", key, p.DataType)

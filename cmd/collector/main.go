@@ -19,6 +19,7 @@ import (
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/observability"
 	"github.com/likongshun/chat/internal/reliability/wal"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 func main() {
@@ -51,10 +52,12 @@ func main() {
 	}
 
 	latestSamples := collector.NewLatestStore(envInt("LATEST_CACHE_MAX_POINTS", 1500000))
+	communicationStats := telemetry.NewCommunicationStats()
 	poller := &collector.ModbusPoller{
 		Config: *configManager.Current(),
 		Latest: latestSamples,
 		ConfigVersion: configVersion,
+		Communication: communicationStats,
 		Timeout: envDuration("POLL_TIMEOUT", 800*time.Millisecond),
 	}
 	dlt645Poller := &collector.DL645Poller{Config: *configManager.Current(), Latest: latestSamples, ConfigVersion: configVersion, Timeout: envDuration("DLT645_TIMEOUT", 1500*time.Millisecond)}
@@ -66,6 +69,7 @@ func main() {
 			Workers: envInt("POLL_WORKERS", 500),
 			OutputBuffer: envInt("SCHEDULER_OUTPUT_BUFFER", 10000),
 			Metrics: collectorMetrics,
+			DeviceStats: communicationStats,
 		},
 		Poller: poller,
 		Router: router,
@@ -73,6 +77,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go monitorPointFreshness(ctx, configManager, latestSamples)
 
 	observabilityDone := make(chan error, 1)
 	observabilityServer := &observability.Server{
@@ -82,6 +87,7 @@ func main() {
 		DLT645: dlt645Poller,
 		Influx: &observability.InfluxQueryOptions{URL: envString("INFLUXDB_URL", "http://influxdb:8086"), Org: envString("INFLUXDB_ORG", "modbus"), Bucket: envString("INFLUXDB_BUCKET", "telemetry"), Token: os.Getenv("INFLUXDB_TOKEN")},
 		Collector: collectorMetrics,
+		Communication: communicationStats,
 		WAL: store,
 		Delivery: deliveryMetrics,
 	}
@@ -413,4 +419,37 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return value
+}
+
+func monitorPointFreshness(ctx context.Context, manager *config.Manager, latest *collector.LatestStore) {
+ ticker:=time.NewTicker(5*time.Second)
+ defer ticker.Stop()
+ var cached *config.Config
+ var expected map[string]time.Duration
+ evaluate:=func() {
+  cfg:=manager.ReadOnly()
+  if cfg==nil { return }
+  if cfg!=cached {
+   next:=make(map[string]time.Duration)
+   for _,device:=range cfg.Devices {
+    if !device.Enabled || device.DiscoveryOnly || device.Interval<=0 { continue }
+    for _,point:=range cfg.Points {
+     if !point.Enabled { continue }
+     if point.Model==device.Model || point.DeviceID==device.ID {
+      next[collector.PointIntervalKey(device.ID,point.PointCode)]=device.Interval
+     }
+    }
+   }
+   cached=cfg
+   expected=next
+  }
+  latest.MarkStale(time.Now().UTC(),expected,2)
+ }
+ evaluate()
+ for {
+  select {
+  case <-ctx.Done(): return
+  case <-ticker.C: evaluate()
+  }
+ }
 }

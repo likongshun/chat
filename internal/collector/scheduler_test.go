@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 func TestSchedulerRunSerializesPerDeviceAndBoundsConcurrency(t *testing.T) {
@@ -94,4 +95,23 @@ func TestBackoffIsBounded(t *testing.T) {
 			t.Fatalf("backoff out of bounds: %s", got)
 		}
 	}
+}
+
+func TestSchedulerRecordsDeviceAndProtocolCommunicationStats(t *testing.T) {
+ stats:=telemetry.NewCommunicationStats()
+ devices:=[]config.Device{{ID:"meter-1",Protocol:"dl-t645-2007",Interval:time.Second,Enabled:true}}
+ ctx,cancel:=context.WithTimeout(context.Background(),35*time.Millisecond)
+ defer cancel()
+ scheduler:=Scheduler{Workers:1,Timeout:8*time.Millisecond,OutputBuffer:4,DeviceStats:stats}
+ poll:=func(ctx context.Context,d config.Device)([]Sample,error) {
+  <-ctx.Done()
+  return nil,ctx.Err()
+ }
+ for range scheduler.Run(ctx,devices,poll) {}
+ device,ok:=stats.Snapshot("meter-1")
+ if !ok || device.Attempts==0 || device.Timeouts==0 { t.Fatalf("missing device communication stats: %+v",device) }
+ protocols:=stats.ProtocolSnapshots()
+ if len(protocols)!=1 || protocols[0].Protocol!="dl-t645-2007" || protocols[0].Timeouts==0 {
+  t.Fatalf("missing protocol communication stats: %+v",protocols)
+ }
 }

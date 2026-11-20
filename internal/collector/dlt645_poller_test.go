@@ -243,3 +243,28 @@ func TestDLT645SharedSerialBusLockHonorsCancellation(t *testing.T) {
 		t.Fatal("waiting device unexpectedly acquired an occupied RS485 bus")
 	}
 }
+
+
+func TestDecode645PointValueUsesFormatPrecisionAndCalibration(t *testing.T) {
+	point := config.Point{DataID:"00010000", Count:4, DataType:"BCD", DataFormat:"XXXXXX.XX", Scale:2, Offset:1}
+	got, err := decode645PointValue([]byte{0,0,1,0,0x78,0x56,0x34,0x12}, point)
+	if err != nil { t.Fatal(err) }
+	if value, ok := got.(float64); !ok || value < 246914.559999 || value > 246914.560001 { t.Fatalf("got %v, want 246914.56", got) }
+}
+
+func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
+	datePoint := config.Point{DataID:"04000102", Count:3, DataType:"BCD", DataFormat:"hhmmss", Scale:1}
+	got, err := decode645PointValue([]byte{2,1,0,4,0x56,0x34,0x12}, datePoint)
+	if err != nil { t.Fatal(err) }
+	if got != "123456" { t.Fatalf("got %#v, want time string", got) }
+
+	demandPoint := config.Point{DataID:"01010000", Count:8, DataType:"BCD", DataFormat:"XXX.XXX+YYMMDDhhmm", Scale:1}
+	wire := []byte{0,0,1,1,0x56,0x34,0x12,0x30,0x12,0x19,0x11,0x26}
+	got, err = decode645PointValue(wire, demandPoint)
+	if err != nil { t.Fatal(err) }
+	composite, ok := got.(map[string]any)
+	if !ok { t.Fatalf("got %T, want composite map", got) }
+	value, ok := composite["value"].(float64)
+	if !ok || math.Abs(value-123.456) > 1e-9 { t.Fatalf("unexpected demand value: %#v", composite) }
+	if composite["occurred_at"] == nil { t.Fatal("missing demand occurrence time") }
+}

@@ -12,12 +12,14 @@ import (
 	"github.com/likongshun/chat/internal/config"
 	"github.com/likongshun/chat/internal/modbus"
 	"github.com/likongshun/chat/internal/processing"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 type ModbusPoller struct {
 	Config  config.Config
 	Latest  *LatestStore
 	ConfigVersion int64
+	Communication *telemetry.CommunicationStats
 	Timeout time.Duration
 	MaxGap  uint16
 
@@ -36,6 +38,7 @@ func (p *ModbusPoller) clientFor(d config.Device) *modbus.Client {
 	timeout := p.Timeout
 	if timeout <= 0 { timeout = 800 * time.Millisecond }
 	c := &modbus.Client{Address:address, Timeout:timeout}
+	c.OnReconnect = func() { if p.Communication != nil { p.Communication.RecordReconnect(d.ID) } }
 	p.clients[d.ID] = c
 	return c
 }

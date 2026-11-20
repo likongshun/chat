@@ -104,3 +104,16 @@ func TestValidateDLT645DiscoveryOnlyDevice(t *testing.T) {
 	c.Devices[0].DiscoveryOnly = false
 	if err := c.Validate(); err == nil { t.Fatal("expected missing meter address rejection") }
 }
+
+
+func TestValidateDLT645DataFormatAndASCII(t *testing.T) {
+	base := Config{
+		Devices: []Device{{ID:"m1",Host:"127.0.0.1",Port:8000,Protocol:"dl-t645-2007",MeterAddress:"123456789012",Model:"DLT",Interval:time.Second,Enabled:true}},
+		Points: []Point{{ID:"DLT/clock",Model:"DLT",PointCode:"clock",DataID:"04000102",Count:3,DataType:"BCD",DataFormat:"hhmmss",Scale:1,Enabled:true}},
+	}
+	if err := base.Validate(); err != nil { t.Fatalf("valid typed point rejected: %v",err) }
+	base.Points[0].DataFormat = "XXXXXX.XX"
+	if err := base.Validate(); err == nil { t.Fatal("expected format/length mismatch rejection") }
+	base.Points[0] = Point{ID:"DLT/serial",Model:"DLT",PointCode:"serial",DataID:"04000401",Count:4,DataType:"ASCII",DataFormat:"ASCII:4",Scale:1,Enabled:true}
+	if err := base.Validate(); err != nil { t.Fatalf("valid ASCII point rejected: %v",err) }
+}

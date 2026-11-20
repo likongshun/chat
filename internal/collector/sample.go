@@ -8,6 +8,8 @@ const (
 	QualityGood      Quality = "good"
 	QualityBad       Quality = "bad"
 	QualityCommError Quality = "communication_error"
+	QualityUncertain Quality = "uncertain"
+	QualityStale Quality = "stale"
 )
 
 type Sample struct {

@@ -25,6 +25,8 @@ type Client struct {
 	mu sync.Mutex
 	conn net.Conn
 	closed bool
+	everConnected bool
+	OnReconnect func()
 	tx atomic.Uint32
 }
 
@@ -50,6 +52,7 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.closed = true
+	c.everConnected = false
 	if c.conn == nil { return nil }
 	err := c.conn.Close()
 	c.conn = nil
@@ -66,6 +69,8 @@ func (c *Client) request(ctx context.Context, unit, fn byte, payload []byte) ([]
 		conn, err := c.dial(ctx)
 		if err != nil { return nil, fmt.Errorf("dial %s: %w", c.Address, err) }
 		c.conn = conn
+		if c.everConnected && c.OnReconnect != nil { c.OnReconnect() }
+		c.everConnected = true
 	}
 
 	conn := c.conn

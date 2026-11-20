@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"sync"
 	"time"
+	"strings"
 )
 
 // LatestStore is a bounded in-memory view of the most recently observed point
@@ -24,6 +25,7 @@ type LatestSample struct {
 	Value any          `json:"value,omitempty"`
 	Quality Quality    `json:"quality"`
 	Error string       `json:"error,omitempty"`
+	QualityReason string `json:"quality_reason,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
 }
@@ -45,8 +47,13 @@ func (s *LatestStore) Update(samples []Sample) {
 			previous:=s.items[key]
 			lastSuccess:=previous.LastSuccess
 			value:=sample.Value
-			if sample.Quality==QualityCommError { value=previous.Value } else { lastSuccess=sample.Timestamp }
-			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
+			reason:=qualityReasonCode(sample.Quality,sample.Error)
+			if sample.Quality==QualityCommError || sample.Quality==QualityBad || sample.Quality==QualityStale {
+				value=previous.Value
+			} else {
+				lastSuccess=sample.Timestamp
+			}
+			latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,QualityReason:reason,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 			s.items[key]=latest
 			s.byDevice[sample.DeviceID][sample.PointCode]=latest
 			s.order.MoveToBack(element)
@@ -63,8 +70,10 @@ func (s *LatestStore) Update(samples []Sample) {
 			s.order.Remove(oldest)
 		}
 		lastSuccess:=time.Time{}
-		if sample.Quality!=QualityCommError { lastSuccess=sample.Timestamp }
-		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:sample.Value,Quality:sample.Quality,Error:sample.Error,Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
+		if sample.Quality==QualityGood || sample.Quality==QualityUncertain { lastSuccess=sample.Timestamp }
+		value:=sample.Value
+		if sample.Quality==QualityCommError || sample.Quality==QualityBad || sample.Quality==QualityStale { value=nil }
+		latest:=LatestSample{DeviceID:sample.DeviceID,PointCode:sample.PointCode,Value:value,Quality:sample.Quality,Error:sample.Error,QualityReason:qualityReasonCode(sample.Quality,sample.Error),Timestamp:sample.Timestamp,LastSuccess:lastSuccess}
 		s.items[key]=latest
 		if s.byDevice[sample.DeviceID]==nil { s.byDevice[sample.DeviceID]=make(map[string]LatestSample) }
 		s.byDevice[sample.DeviceID][sample.PointCode]=latest
@@ -94,4 +103,72 @@ func (s *LatestStore) LastSuccess(deviceID string) time.Time {
 	var latest time.Time
 	for _,sample:=range s.byDevice[deviceID] { if sample.LastSuccess.After(latest) { latest=sample.LastSuccess } }
 	return latest
+}
+
+func PointIntervalKey(deviceID,pointCode string) string {
+ return latestKey(deviceID,pointCode)
+}
+
+// MarkStale applies freshness deadlines without replacing the last known value.
+// expectedIntervals is keyed by PointIntervalKey and should come from one
+// immutable configuration snapshot.
+func (s *LatestStore) MarkStale(now time.Time,expectedIntervals map[string]time.Duration,multiplier float64) int {
+ if s==nil||len(expectedIntervals)==0 { return 0 }
+ if multiplier<=0 { multiplier=2 }
+ changed:=0
+ s.mu.Lock()
+ defer s.mu.Unlock()
+ for key,current:=range s.items {
+  if current.Quality==QualityStale { continue }
+  interval,ok:=expectedIntervals[key]
+  if !ok||interval<=0||current.LastSuccess.IsZero() { continue }
+  deadline:=time.Duration(float64(interval)*multiplier)
+  if deadline<interval { deadline=interval }
+  if now.Before(current.LastSuccess.Add(deadline)) { continue }
+  current.Quality=QualityStale
+  current.QualityReason="STALE_TIMEOUT"
+  current.Error="point value exceeded freshness deadline"
+  s.items[key]=current
+  s.byDevice[current.DeviceID][current.PointCode]=current
+  changed++
+ }
+ return changed
+}
+
+func qualityReasonCode(quality Quality,detail string) string {
+ switch quality {
+ case QualityGood:
+  return ""
+ case QualityUncertain:
+  return "ESTIMATED_VALUE"
+ case QualityStale:
+  return "STALE_TIMEOUT"
+ }
+ message:=strings.ToLower(detail)
+ switch {
+ case strings.Contains(message,"timeout"),strings.Contains(message,"deadline"):
+  return "TIMEOUT"
+ case strings.Contains(message,"crc"),strings.Contains(message,"checksum"):
+  return "CRC_ERROR"
+ case strings.Contains(message,"decode"),strings.Contains(message,"bcd"):
+  return "DECODE_ERROR"
+ case strings.Contains(message,"range"):
+  return "OUT_OF_RANGE"
+ case strings.Contains(message,"meter returned"):
+  return "DEVICE_ERROR"
+ default:
+  return "PROTOCOL_ERROR"
+ }
+}
+
+func (s *LatestStore) QualityCounts() map[Quality]uint64 {
+ out:=map[Quality]uint64{
+  QualityGood:0,QualityBad:0,QualityCommError:0,
+  QualityUncertain:0,QualityStale:0,
+ }
+ if s==nil { return out }
+ s.mu.RLock()
+ for _,sample:=range s.items { out[sample.Quality]++ }
+ s.mu.RUnlock()
+ return out
 }

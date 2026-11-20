@@ -14,6 +14,7 @@ import (
 	"github.com/likongshun/chat/internal/collector"
 	"github.com/likongshun/chat/internal/pipeline"
 	"github.com/likongshun/chat/internal/reliability/wal"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 type Server struct {
@@ -24,6 +25,7 @@ type Server struct {
 	Influx    *InfluxQueryOptions
 	InfluxClient *http.Client
 	Collector *collector.Metrics
+	Communication *telemetry.CommunicationStats
 	WAL       *wal.WAL
 	Delivery  *pipeline.DeliveryMetrics
 
@@ -111,6 +113,42 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 		if !m.LastPoll.IsZero() {
 			fmt.Fprintln(w, "# TYPE modbus_collector_last_poll_timestamp_seconds gauge")
 			fmt.Fprintf(w, "modbus_collector_last_poll_timestamp_seconds %d\n", m.LastPoll.Unix())
+		}
+	}
+	if s.Communication != nil {
+		m := s.Communication.FleetSnapshot()
+		fmt.Fprintln(w, "# TYPE dcim_edge_devices_tracked gauge")
+		fmt.Fprintf(w, "dcim_edge_devices_tracked %d\\n", m.Devices)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_attempts_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_attempts_total %d\\n", m.Attempts)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_successes_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_successes_total %d\\n", m.Successes)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_failures_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_failures_total %d\\n", m.Failures)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_timeouts_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_timeouts_total %d\\n", m.Timeouts)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_reconnects_total counter")
+		fmt.Fprintf(w, "dcim_edge_communication_reconnects_total %d\\n", m.Reconnects)
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_sum summary")
+		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_sum %f\\n", m.LatencyTotal.Seconds())
+		fmt.Fprintln(w, "# TYPE dcim_edge_communication_latency_seconds_count summary")
+		fmt.Fprintf(w, "dcim_edge_communication_latency_seconds_count %d\\n", m.LatencyCount)
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_attempts_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_successes_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_failures_total counter")
+		fmt.Fprintln(w, "# TYPE dcim_edge_protocol_poll_timeouts_total counter")
+		for _, protocol := range s.Communication.ProtocolSnapshots() {
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_attempts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Attempts)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_successes_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Successes)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_failures_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Failures)
+			fmt.Fprintf(w, "dcim_edge_protocol_poll_timeouts_total{protocol=%q} %d\\n", protocol.Protocol, protocol.Timeouts)
+		}
+	}
+	if s.Latest != nil {
+		counts := s.Latest.QualityCounts()
+		fmt.Fprintln(w, "# TYPE dcim_edge_points_by_quality gauge")
+		for _, quality := range []collector.Quality{collector.QualityGood, collector.QualityBad, collector.QualityCommError, collector.QualityUncertain, collector.QualityStale} {
+			fmt.Fprintf(w, "dcim_edge_points_by_quality{quality=%q} %d\\n", quality, counts[quality])
 		}
 	}
 	if s.WAL != nil {

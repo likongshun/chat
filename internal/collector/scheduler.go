@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"net"
+	"strings"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/telemetry"
 )
 
 type PollFunc func(context.Context, config.Device) ([]Sample, error)
@@ -32,6 +35,7 @@ type Scheduler struct {
 	InitialStagger bool
 	DisableInitialStagger bool
 	Metrics       *Metrics
+	DeviceStats   *telemetry.CommunicationStats
 }
 
 func (s Scheduler) defaults() Scheduler {
@@ -114,6 +118,10 @@ func (s Scheduler) runDevice(ctx context.Context, limit chan struct{}, out chan<
 		finished := time.Now()
 		result := Result{DeviceID:d.ID, At:finished, StartedAt:started, Duration:finished.Sub(started), Samples:samples, Err:err}
 		s.Metrics.record(result)
+		if s.DeviceStats != nil {
+			code, timeout := communicationErrorCode(err)
+			s.DeviceStats.RecordProtocol(d.Protocol, d.ID, finished, result.Duration, code, timeout, false)
+		}
 		select {
 		case out <- result:
 		case <-ctx.Done():
@@ -177,4 +185,23 @@ func (s Scheduler) Poll(ctx context.Context, devices []config.Device, fn func(co
 	for r := range out { results = append(results, r) }
 	sort.Slice(results, func(i,j int) bool { return results[i].StartedAt.Before(results[j].StartedAt) })
 	return results
+}
+
+func communicationErrorCode(err error) (string, bool) {
+ if err==nil { return "",false }
+ if errors.Is(err,context.DeadlineExceeded) { return "TIMEOUT",true }
+ if errors.Is(err,context.Canceled) { return "CANCELED",false }
+ var netErr net.Error
+ if errors.As(err,&netErr) && netErr.Timeout() { return "TIMEOUT",true }
+ message:=strings.ToLower(err.Error())
+ switch {
+ case strings.Contains(message,"crc"),strings.Contains(message,"checksum"):
+  return "CRC_ERROR",false
+ case strings.Contains(message,"decode"),strings.Contains(message,"bcd"):
+  return "DECODE_ERROR",false
+ case strings.Contains(message,"protocol"):
+  return "PROTOCOL_ERROR",false
+ default:
+  return "COMMUNICATION_ERROR",false
+ }
 }

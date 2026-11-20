@@ -28,6 +28,8 @@ jobs:
         run: go test ./...
       - name: Race tests
         run: go test -race ./...
+      - name: Mixed-protocol load-generator smoke
+        run: go run ./cmd/loadtest -devices 10 -points 5 -workers 10 -interval 20ms -duration 1s -latency 1ms -error-every 7
       - name: WAL backlog snapshot and recovery benchmark
         run: go test ./internal/reliability/wal -run '^$' -bench '^BenchmarkWALBacklogSnapshotRecovery$' -benchtime=30s -count=1
       - name: Sustained pending backlog checkpoint and restart soak

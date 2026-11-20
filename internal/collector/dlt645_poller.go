@@ -145,11 +145,12 @@ func (p *DL645Poller) Poll(ctx context.Context, d config.Device) ([]Sample, erro
 						var payload []byte
 						payload, err = read645Payload(conn, frame, address, pt.DataID, timeout, ctx)
 						if err == nil {
-							var decoded float64
-							decoded, err = decode645Value(payload, pt.DataID, pt.DataType, pt.Count, pt.Scale, pt.Offset)
+							var value any
+							value, err = decode645PointValue(payload, pt)
 							if err == nil {
-								var value any = decoded
-								value, err = processing.Apply(pt.PointCode, value, p.Config.Processing, p.Config.Enums)
+								if _, composite := value.(map[string]any); !composite {
+									value, err = processing.Apply(pt.PointCode, value, p.Config.Processing, p.Config.Enums)
+								}
 								if err == nil { s.Value = value }
 							}
 						}
@@ -284,4 +285,41 @@ func read645RawFrame(r io.Reader) ([]byte, error) {
 	copy(raw[1:10], header)
 	if _, err := io.ReadFull(r, raw[10:]); err != nil { return nil, err }
 	return raw, nil
+}
+
+
+// decode645PointValue applies the point's explicit wire format when configured.
+// Decimal places are encoded by DataFormat; Scale is an additional calibration
+// multiplier only. Legacy points without DataFormat retain the historical BCD
+// decoder and scale behavior.
+func decode645PointValue(data []byte, pt config.Point) (any, error) {
+	if pt.DataFormat == "" {
+		return decode645Value(data, pt.DataID, pt.DataType, pt.Count, pt.Scale, pt.Offset)
+	}
+	if len(data) < 4 {
+		return nil, fmt.Errorf("DL/T645 payload too short: %d", len(data))
+	}
+	id := strings.ToUpper(hex.EncodeToString([]byte{data[3], data[2], data[1], data[0]}))
+	if id != strings.ToUpper(strings.TrimSpace(pt.DataID)) {
+		return nil, fmt.Errorf("DL/T645 data identifier mismatch: got %s want %s", id, pt.DataID)
+	}
+	if len(data)-4 != int(pt.Count) {
+		return nil, fmt.Errorf("DL/T645 data length mismatch: got %d want %d", len(data)-4, pt.Count)
+	}
+	decoded, err := dlt645.DecodeDataFormat(data[4:], pt.DataFormat)
+	if err != nil { return nil, err }
+	switch v := decoded.(type) {
+	case float64:
+		return v*pt.Scale + pt.Offset, nil
+	case map[string]any:
+		if raw, ok := v["value"].(float64); ok { v["value"] = raw*pt.Scale + pt.Offset }
+		return v, nil
+	case string:
+		if pt.Scale != 1 || pt.Offset != 0 {
+			return nil, fmt.Errorf("non-numeric DL/T645 format %q requires scale=1 and offset=0", pt.DataFormat)
+		}
+		return v, nil
+	default:
+		return nil, fmt.Errorf("unsupported decoded DL/T645 value type %T", decoded)
+	}
 }
