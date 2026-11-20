@@ -1,13 +1,16 @@
 package collector
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/likongshun/chat/internal/config"
+	"github.com/likongshun/chat/internal/dlt645"
 )
 
 // This is a wire-level TCP-to-RS485 gateway simulator. It deliberately speaks
@@ -162,4 +165,57 @@ func TestSimulator645FrameLengthField(t *testing.T) {
 	if got := int(frame[9]); got != 3 {
 		t.Fatalf("DL/T645 length field=%d, want 3", got)
 	}
+}
+
+
+func TestDLT645LoadRecordContinuationOverRealTCP(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil { t.Fatal(err) }
+	defer ln.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil { serverDone <- err; return }
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(2*time.Second))
+		request := make([]byte, 17)
+		if _, err := io.ReadFull(conn, request); err != nil { serverDone <- err; return }
+		if request[8] != 0x11 || request[9] != 0x0a {
+			serverDone <- fmt.Errorf("unexpected load-record request: %x", request)
+			return
+		}
+		// Appendix A.7 DI 06010001: class-1 record at a given time.
+		di := []byte{0x01, 0x00, 0x01, 0x06}
+		first := append(append([]byte(nil), di...), 0x11, 0x22)
+		if _, err := conn.Write(simulator645Frame("123456789012", 0xB1, first)); err != nil {
+			serverDone <- err; return
+		}
+		follow := make([]byte, 17)
+		if _, err := io.ReadFull(conn, follow); err != nil { serverDone <- err; return }
+		if follow[8] != 0x12 || follow[14] != 0x34 {
+			serverDone <- fmt.Errorf("unexpected continuation request: %x", follow)
+			return
+		}
+		last := append(append([]byte(nil), di...), 0x33, 0x01)
+		if _, err := conn.Write(simulator645Frame("123456789012", 0x92, last)); err != nil {
+			serverDone <- err; return
+		}
+		serverDone <- nil
+	}()
+
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	if err != nil { t.Fatal(err) }
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2*time.Second))
+	start := time.Date(2026, time.November, 20, 13, 16, 0, 0, time.UTC)
+	request, err := dlt645.EncodeReadLoadRecord("123456789012", "06010001", 2, &start)
+	if err != nil { t.Fatal(err) }
+	if err := writeAll(conn, request); err != nil { t.Fatal(err) }
+	frame, err := read645Frame(conn, "123456789012")
+	if err != nil { t.Fatal(err) }
+	got, err := read645Payload(conn, frame, "123456789012", "06010001", time.Second, context.Background())
+	if err != nil { t.Fatal(err) }
+	want := []byte{0x01, 0x00, 0x01, 0x06, 0x11, 0x22, 0x33}
+	if !bytes.Equal(got, want) { t.Fatalf("assembled payload=%x, want %x", got, want) }
+	if err := <-serverDone; err != nil { t.Fatal(err) }
 }
