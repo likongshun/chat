@@ -36,6 +36,7 @@ This checklist is the execution ledger for `docs/DCIM_EDGE_PHASE1_ARCHITECTURE.m
 - [x] Route DL/T645 Poller through typed decoding when data_format is configured; preserve legacy BCD decoding when omitted.
 - [x] Add composite maximum-demand decoding into numeric value plus occurrence timestamp.
 - [x] Separate decimal precision in data_format from the optional calibration multiplier/offset; standard templates use scale=1 when precision is already encoded in the format.
+- [x] Add DL/T645-2007 Appendix A.6 scheduled-freeze DI templates for previous scheduled-freeze timestamp, forward active energy and forward/reverse maximum demand with occurrence time; keep meter freeze-mode/model compatibility explicitly documented.
 
 ## E. Query and aggregation
 - [ ] Specify API request/response types and error envelope.
