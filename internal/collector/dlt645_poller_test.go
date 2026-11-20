@@ -264,6 +264,7 @@ func TestDecode645PointValueReturnsTypedDateAndCompositeDemand(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	composite, ok := got.(map[string]any)
 	if !ok { t.Fatalf("got %T, want composite map", got) }
-	if composite["value"] != float64(123.456) { t.Fatalf("unexpected demand value: %#v", composite) }
+	value, ok := composite["value"].(float64)
+	if !ok || math.Abs(value-123.456) > 1e-9 { t.Fatalf("unexpected demand value: %#v", composite) }
 	if composite["occurred_at"] == nil { t.Fatal("missing demand occurrence time") }
 }
